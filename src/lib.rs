@@ -6,3 +6,4 @@ pub mod rng;
 pub mod genome;
 pub mod params;
 pub mod organism;
+pub mod population;
