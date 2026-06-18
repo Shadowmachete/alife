@@ -97,6 +97,57 @@ pub fn move_organisms<S: Space>(
     }
 }
 
+/// Resolve at most one predation per cell: the strongest predator
+/// (`size·diet`, ties→lowest index) eats the smallest other occupant, but only
+/// if it is a real predator (`diet > 0.5`) and strictly bigger than its victim.
+/// Prey energy is drained to zero (it dies next cull); the predator banks
+/// `prey.energy · predation_efficiency · valaar_efficiency`, capped by storage.
+pub fn predate<S: Space>(space: &S, pop: &mut Population, eco: &EcoParams) {
+    let occ = pop.occupancy(space);
+    let orgs = pop.organisms_mut();
+    for cell in &occ {
+        if cell.len() < 2 {
+            continue;
+        }
+        // Strongest attacker by power = size * diet (ties → lowest index).
+        let mut attacker = cell[0];
+        for &i in cell {
+            let pi = orgs[i].genome.size * orgs[i].genome.diet;
+            let pa = orgs[attacker].genome.size * orgs[attacker].genome.diet;
+            if pi > pa {
+                attacker = i;
+            }
+        }
+        if orgs[attacker].genome.diet <= 0.5 {
+            continue; // no real predator here
+        }
+        // Smallest victim among the others (ties → lowest index).
+        let mut victim: Option<usize> = None;
+        for &i in cell {
+            if i == attacker {
+                continue;
+            }
+            match victim {
+                None => victim = Some(i),
+                Some(v) if orgs[i].genome.size < orgs[v].genome.size => victim = Some(i),
+                _ => {}
+            }
+        }
+        let victim = match victim {
+            Some(v) => v,
+            None => continue,
+        };
+        if orgs[attacker].genome.size <= orgs[victim].genome.size {
+            continue; // can't overpower
+        }
+        let prey_energy = orgs[victim].energy;
+        let gain = prey_energy * eco.predation_efficiency * orgs[attacker].genome.valaar_efficiency;
+        orgs[victim].energy = 0.0;
+        let cap = orgs[attacker].max_energy(eco);
+        orgs[attacker].energy = (orgs[attacker].energy + gain).min(cap);
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -240,5 +291,54 @@ mod tests {
         move_organisms(&space, &field, &mut pop, &eco, &mut rng);
         assert_eq!(pop.organisms()[0].pos, peak);
         assert_eq!(pop.organisms()[0].energy, 5.0, "no move, no cost");
+    }
+
+    // [size, eff, speed, diet, repro_threshold, lifespan]
+    fn predator(size: f32) -> Genome {
+        Genome::from_array([size, 1.0, 0.0, 1.0, 0.9, 0.5])
+    }
+    fn prey(size: f32) -> Genome {
+        Genome::from_array([size, 1.0, 0.0, 0.0, 0.9, 0.5])
+    }
+
+    #[test]
+    fn predator_eats_smaller_co_located_prey() {
+        let space = Grid2p5D::new(4, 4);
+        let eco = EcoParams::default();
+        let c = Coord::new(2, 2, Layer::Surface);
+        let mut pop = Population::new();
+        pop.spawn(TraitOrganism::new(predator(0.9), c, 1.0)); // big predator
+        pop.spawn(TraitOrganism::new(prey(0.2), c, 3.0)); // small prey, energy 3
+
+        predate(&space, &mut pop, &eco);
+
+        let pred = &pop.organisms()[0];
+        let victim = &pop.organisms()[1];
+        assert!(pred.energy > 1.0, "predator should gain");
+        assert_eq!(victim.energy, 0.0, "prey should be drained");
+    }
+
+    #[test]
+    fn lone_organism_is_not_eaten() {
+        let space = Grid2p5D::new(4, 4);
+        let eco = EcoParams::default();
+        let c = Coord::new(2, 2, Layer::Surface);
+        let mut pop = Population::new();
+        pop.spawn(TraitOrganism::new(predator(0.9), c, 1.0));
+        predate(&space, &mut pop, &eco);
+        assert_eq!(pop.organisms()[0].energy, 1.0);
+    }
+
+    #[test]
+    fn autotrophs_do_not_predate() {
+        let space = Grid2p5D::new(4, 4);
+        let eco = EcoParams::default();
+        let c = Coord::new(2, 2, Layer::Surface);
+        let mut pop = Population::new();
+        pop.spawn(TraitOrganism::new(prey(0.9), c, 1.0)); // big but diet 0
+        pop.spawn(TraitOrganism::new(prey(0.2), c, 3.0));
+        predate(&space, &mut pop, &eco);
+        assert_eq!(pop.organisms()[0].energy, 1.0);
+        assert_eq!(pop.organisms()[1].energy, 3.0);
     }
 }
