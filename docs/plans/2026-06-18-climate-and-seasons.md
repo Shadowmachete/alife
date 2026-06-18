@@ -13,6 +13,7 @@
 **Design source:** `~/dev/ideas/world-design.md` §F (environmental axes ↔ genes; the 6-arh cycle: Rasgun→Goscon→Miscre→Vraze→Dansch→Laisp; hazards) and §D. Calendar: 6 arhs × 117 craws = 702 craws/year.
 
 **Builds on (plans 1–2, shipped — exact interfaces consumed):**
+
 - `genome::{Genome, TRAIT_COUNT, from_array, to_array, clamped, random, mutate}` — **extended here** (6→8 traits).
 - `organism::{Organism (trait), TraitOrganism}`; `population::Population`; `params::EcoParams`.
 - `ecology::{absorb, move_organisms, predate, metabolize, cull_and_recycle, reproduce}`.
@@ -31,13 +32,18 @@
 - **Backward compatibility:** plan 2's behaviour is preserved when climate is neutral. The two new genes are appended at genome indices 6–7, so trait indices 0–5 keep their meaning.
 - **Version control:** commit per task, **no `Co-Authored-By` trailer** (user preference).
 
-**Scope (plan 3 of several) — DEFERRED to a later plan, on purpose:**
-- Dynamic geography: Vraze **land-bridges** + **earthquakes** opening underground access (mutating `Space`/access-points over time).
+**Scope (plan 3 of several) — what's DEFERRED, and to which plan:**
+
+**Plan 4 (the agreed next plan) — static geography.** Hard-wire the world's *abiotic stage* from the Alchaea lore: continents, oceans (barriers), and the valaar rivers flowing from Rasconne — as a per-cell **terrain map** (cell type + valaar conductivity + passability) that the existing diffusion (`diffuse_planar`) and movement (`move_organisms`) become aware of. Authoring this is *correct*, not a compromise: geography is geological backstory, fixed on evolutionary timescales, so it's the stage; biology still emerges on top. It is also the prerequisite for the dynamic-world work below (land-bridges need oceans to bridge) and for real **speciation** (oceans = barriers → allopatric divergence).
+  - **Workflow:** the user sketches a rough 2D structure; a **lore-constrained procedural generator** fleshes it into the terrain map (continents split outward from a central Rasconne, oceans between, valaar rivers traced down the gradient) — seeded/reproducible, with a canonical seed = "the" Alchaea.
+  - **Visualisation (likely required at this point):** once a static map exists we need a renderer — at minimum to eyeball that the map *makes sense*. 2D → a grid/tile view; a future 3D world → voxel-style. This is the project's first real renderer (beyond the ASCII heatmap).
+
+**Plan 5+ — the dynamic world (depends on plan 4's geography):**
+
+- Dynamic geography: Vraze **land-bridges** + **earthquakes** opening underground access (mutating the terrain / access-points over time).
 - Valaar **state machine**: Vraze crystallisation, Miscre **airborne valaar reaching the Dusk** (valaar↔climate cross-coupling).
 - **Mutation-as-a-field** (local mutation rate ∝ valaar, spiking at Rasgun) — still *pending the user's nod*.
 - The underground as a **climate refuge** + a `digging`/`subterranean` gene (no layer-changing movement exists yet).
-
-These are a separate subsystem (dynamic world + valaar-state) and belong in plan 4.
 
 ---
 
@@ -72,10 +78,12 @@ Each `src/lib.rs` edit adds one `pub mod`, shown in its task.
 ### Task 1: Extend the genome to 8 traits
 
 **Files:**
+
 - Modify: `src/genome.rs` (consts, struct, `from_array`/`to_array`, tests)
 - Modify: `src/organism.rs`, `src/population.rs`, `src/ecology.rs`, `tests/ecology.rs`, `src/bin/life.rs` (fixture call sites — append two trait values)
 
 **Interfaces:**
+
 - Consumes: `Rng` (plan 1).
 - Produces: `pub const TRAIT_COUNT: usize = 8;` and `Genome` with two extra fields `pub heat_tolerance: f32, pub drought_tolerance: f32` (indices 6, 7). `random`/`mutate`/`clamped` are unchanged (they loop over `TRAIT_COUNT`).
 
@@ -215,10 +223,12 @@ git -C ~/dev/alife add -A && git -C ~/dev/alife commit -m "feat: genome gains he
 ### Task 2: The season calendar (`season`)
 
 **Files:**
+
 - Create: `src/season.rs`
 - Modify: `src/lib.rs` (add `pub mod season;`)
 
 **Interfaces:**
+
 - Consumes: nothing.
 - Produces:
   - `pub const CRAWS_PER_ARH: u32 = 117;` `pub const ARHS_PER_YEAR: u32 = 6;` `pub const CRAWS_PER_YEAR: u32 = 702;`
@@ -413,10 +423,12 @@ git -C ~/dev/alife add -A && git -C ~/dev/alife commit -m "feat: 6-arh season ca
 ### Task 3: Climate config + relaxation (`climate`)
 
 **Files:**
+
 - Create: `src/climate.rs`
 - Modify: `src/lib.rs` (add `pub mod climate;`)
 
 **Interfaces:**
+
 - Consumes: `Field` (plan 1), `Season` (Task 2).
 - Produces:
   - `pub struct SeasonTarget { pub heat: f32, pub water: f32, pub valaar_mult: f32 }`.
@@ -574,10 +586,12 @@ git -C ~/dev/alife add -A && git -C ~/dev/alife commit -m "feat: climate config 
 ### Task 4: Environmental stress (`ecology::environmental_stress`)
 
 **Files:**
+
 - Modify: `src/params.rs` (add two stress coefficients)
 - Modify: `src/ecology.rs` (add `environmental_stress`; extend `tests`)
 
 **Interfaces:**
+
 - Consumes: `Space`, `Field` (plan 1); `Population`, `EcoParams` (plan 2); the `Organism` trait for `pos`.
 - Produces:
   - `EcoParams` gains `pub heat_stress: f32` and `pub drought_stress: f32` (with defaults).
@@ -709,10 +723,12 @@ git -C ~/dev/alife add -A && git -C ~/dev/alife commit -m "feat: environmental_s
 ### Task 5: Wire climate into `Sim`
 
 **Files:**
+
 - Modify: `src/sim.rs` (new fields, `with_climate`, `step` order)
 - Modify: `tests/ecology.rs` (keep the existing persistence test green with climate on)
 
 **Interfaces:**
+
 - Consumes: everything above + plan 1/2.
 - Produces: `Sim` gains `pub heat: Field, pub water: Field, pub calendar: Calendar, pub climate: Climate`; `pub fn with_climate(world: World<S>, eco: EcoParams, climate: Climate, seed: u64) -> Sim<S>`; `pub fn season(&self) -> Season`; `Sim::new` now also initialises those (defaulting `Climate`). `[ASSUMPTION A6, A7, A8]`
 
@@ -840,10 +856,12 @@ git -C ~/dev/alife add -A && git -C ~/dev/alife commit -m "feat: Sim weaves cale
 ### Task 6: Season-aware census + integration tests
 
 **Files:**
+
 - Modify: `src/bin/life.rs` (print season + mean tolerances)
 - Modify: `tests/ecology.rs` (add season-cycle + stress-selection tests)
 
 **Interfaces:**
+
 - Consumes: `Sim`, `Season`, `Climate`, `Calendar`, plan 1/2.
 - Produces: no new public API — verification + demonstration.
 
@@ -971,7 +989,7 @@ git -C ~/dev/alife add -A && git -C ~/dev/alife commit -m "feat: season-aware li
 
 A world with weather: heat and water fields that cycle through the six arhs, two tolerance genes under genuine seasonal selection, and a calendar that makes Dansch a drought to survive and Miscre a monsoon — all deterministic, std-only, and layered cleanly on the existing substrate and ecology. Each season now rewards a different organism, which is the edge-of-chaos engine the design is built around.
 
-**Next plans (not in scope here):** dynamic geography (Vraze land-bridges + earthquakes opening the underground); the valaar state-machine (crystallisation, Miscre airborne valaar reaching the Dusk); the `digging`/`subterranean` gene + underground as a climate refuge; mutation-as-a-field (pending a nod); wgpu acceleration + the live renderer; the Python natural-history / timeline layer.
+**Next plans (not in scope here):** **Plan 4 — static geography** (continents, oceans, valaar rivers as a terrain map; built from a user sketch via a lore-constrained procedural generator; needs a map visualiser — grid/tile for 2D, voxel-style for 3D — to validate it). Then **plan 5+ — the dynamic world**: dynamic geography (Vraze land-bridges + earthquakes); the valaar state-machine (crystallisation, Miscre airborne valaar → Dusk); the `digging`/subterranean gene + underground refuge; mutation-as-a-field (pending a nod). Cross-cutting, later: wgpu acceleration + the live renderer; the Python natural-history / timeline layer.
 
 ## Self-review notes
 
