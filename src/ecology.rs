@@ -7,7 +7,7 @@
 //! (`max_energy`, `is_alive`, …) come from the `Organism` trait.
 
 use crate::field::Field;
-use crate::organism::Organism;
+use crate::organism::{Organism, TraitOrganism};
 use crate::params::EcoParams;
 use crate::population::Population;
 use crate::rng::Rng;
@@ -145,6 +145,26 @@ pub fn predate<S: Space>(space: &S, pop: &mut Population, eco: &EcoParams) {
         orgs[victim].energy = 0.0;
         let cap = orgs[attacker].max_energy(eco);
         orgs[attacker].energy = (orgs[attacker].energy + gain).min(cap);
+    }
+}
+
+/// Asexual reproduction: any organism at or above its energy threshold spawns
+/// one child in its own cell. The child takes `repro_cost_fraction` of the
+/// parent's energy and a mutated copy of its genome. Children are collected
+/// first, then appended, so iteration order (and determinism) is stable.
+pub fn reproduce(pop: &mut Population, eco: &EcoParams, rng: &mut Rng) {
+    let mut children: Vec<TraitOrganism> = Vec::new();
+    for o in pop.organisms_mut() {
+        let threshold = o.genome.repro_threshold * o.max_energy(eco);
+        if o.energy >= threshold && o.energy > 0.0 {
+            let child_energy = o.energy * eco.repro_cost_fraction;
+            o.energy -= child_energy;
+            let child_genome = o.genome.mutate(rng, eco.mutation_rate);
+            children.push(TraitOrganism::new(child_genome, o.pos, child_energy));
+        }
+    }
+    for c in children {
+        pop.spawn(c);
     }
 }
 
@@ -340,5 +360,37 @@ mod tests {
         predate(&space, &mut pop, &eco);
         assert_eq!(pop.organisms()[0].energy, 1.0);
         assert_eq!(pop.organisms()[1].energy, 3.0);
+    }
+
+    #[test]
+    fn well_fed_organism_spawns_one_child() {
+        let eco = EcoParams::default();
+        let c = Coord::new(1, 1, Layer::Surface);
+        let mut pop = Population::new();
+        // repro_threshold 0.0 => any positive energy triggers reproduction.
+        let g = Genome::from_array([0.5, 1.0, 0.0, 0.0, 0.0, 0.5]);
+        let parent = TraitOrganism::new(g, c, 5.0);
+        pop.spawn(parent);
+        let mut rng = Rng::new(3);
+        reproduce(&mut pop, &eco, &mut rng);
+        assert_eq!(pop.len(), 2);
+        let child = &pop.organisms()[1];
+        assert_eq!(child.pos, c);
+        assert!((child.energy - 5.0 * eco.repro_cost_fraction).abs() < 1e-6);
+        // parent paid for it
+        assert!(pop.organisms()[0].energy < 5.0);
+    }
+
+    #[test]
+    fn starving_organism_does_not_reproduce() {
+        let eco = EcoParams::default();
+        let c = Coord::new(1, 1, Layer::Surface);
+        let mut pop = Population::new();
+        // repro_threshold 1.0 => needs full storage; give it almost none.
+        let g = Genome::from_array([0.5, 1.0, 0.0, 0.0, 1.0, 0.5]);
+        pop.spawn(TraitOrganism::new(g, c, 0.1));
+        let mut rng = Rng::new(3);
+        reproduce(&mut pop, &eco, &mut rng);
+        assert_eq!(pop.len(), 1);
     }
 }
