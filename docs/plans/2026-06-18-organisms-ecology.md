@@ -2,6 +2,15 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **Implementation note (2026-06-18, post-write — this plan is now ✅ built):** Two deviations from the
+> text below were applied during execution. (1) **Rename:** the concrete organism is **`TraitOrganism`**,
+> implementing a clade-agnostic **`Organism` trait** (so `NeuralOrganism` / `MorphologicalOrganism` can be
+> added later). Read every `Organism` *struct* reference below as `TraitOrganism`; the derived methods
+> (`max_energy` / `basal_cost` / `lifespan_ticks` / `is_alive`) live on the `Organism` *trait*, which the
+> ecology/population modules import. (2) **Task 6 fix:** the `metabolize` test seeds energy `2.0`, not
+> `5.0` — a `5.0` seed exceeds size-0.5 storage (`max_energy` = 3.0) and the storage cap masked the basal
+> subtraction.
+
 **Goal:** Put *life* on the world substrate — trait-vector organisms that absorb valaar, move, eat each other, age, die back into the field, and reproduce with mutation — so an unguided population persists and evolves under the emergent valaar gradient.
 
 **Architecture:** Layered on top of plan 1's substrate. New modules: a std-only seeded PRNG (`rng`), the `genome` trait-vector, the `organism` record + derived metabolism, a `population` store with a per-cell occupancy index, the `ecology` tick functions (pure-ish fns over `Space`/`Field`/`Population`), and a `Sim` that owns a `World` + `Population` and composes the per-tick order. Selection stays **implicit**: nothing scores fitness — death and birth are consequences of energy-vs-world.
