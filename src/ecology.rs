@@ -34,6 +34,37 @@ pub fn absorb<S: Space>(space: &S, field: &mut Field, pop: &mut Population, eco:
     }
 }
 
+/// Spend basal energy, cap storage, and age every organism by one tick.
+pub fn metabolize(pop: &mut Population, eco: &EcoParams) {
+    for o in pop.organisms_mut() {
+        o.energy -= o.basal_cost(eco);
+        let cap = o.max_energy(eco);
+        if o.energy > cap {
+            o.energy = cap;
+        }
+        o.age += 1;
+    }
+}
+
+/// Return each dead organism's remaining energy to its cell as detritus
+/// (recycling), then drop the dead from the population.
+pub fn cull_and_recycle<S: Space>(
+    space: &S,
+    field: &mut Field,
+    pop: &mut Population,
+    eco: &EcoParams,
+) {
+    for o in pop.organisms() {
+        if !o.is_alive(eco) {
+            let detritus = o.energy.max(0.0) * eco.detritus_fraction;
+            if detritus > 0.0 {
+                field.add(space.index(o.pos), detritus);
+            }
+        }
+    }
+    pop.retain(|o| o.is_alive(eco));
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -97,5 +128,50 @@ mod tests {
 
         absorb(&space, &mut field, &mut pop, &eco);
         assert!(pop.organisms()[0].energy <= cap + 1e-5, "must not exceed storage");
+    }
+
+    #[test]
+    fn metabolize_spends_energy_and_ages() {
+        let eco = EcoParams::default();
+        let c = Coord::new(0, 0, Layer::Surface);
+        let mut pop = Population::new();
+        // Start within storage capacity so the basal subtraction is visible
+        // (max_energy for size 0.5 is 3.0; a higher seed would just clamp to 3.0).
+        let o = TraitOrganism::new(genome(0.0, 1.0), c, 2.0);
+        let cost = o.basal_cost(&eco);
+        pop.spawn(o);
+        metabolize(&mut pop, &eco);
+        assert!((pop.organisms()[0].energy - (2.0 - cost)).abs() < 1e-6);
+        assert_eq!(pop.organisms()[0].age, 1);
+    }
+
+    #[test]
+    fn starved_organism_is_culled() {
+        let space = Grid2p5D::new(4, 4);
+        let eco = EcoParams::default();
+        let mut field = crate::field::Field::zeros(space.len());
+        let c = Coord::new(2, 2, Layer::Surface);
+        let mut pop = Population::new();
+        let mut o = TraitOrganism::new(genome(0.0, 1.0), c, 0.0);
+        o.energy = 0.0;
+        pop.spawn(o);
+        cull_and_recycle(&space, &mut field, &mut pop, &eco);
+        assert_eq!(pop.len(), 0);
+    }
+
+    #[test]
+    fn old_age_death_returns_detritus() {
+        let space = Grid2p5D::new(4, 4);
+        let eco = EcoParams::default();
+        let mut field = crate::field::Field::zeros(space.len());
+        let c = Coord::new(2, 2, Layer::Surface);
+        let mut pop = Population::new();
+        let mut o = TraitOrganism::new(genome(0.0, 1.0), c, 4.0);
+        o.age = o.lifespan_ticks(&eco); // too old, but still has energy
+        let expected = 4.0 * eco.detritus_fraction;
+        pop.spawn(o);
+        cull_and_recycle(&space, &mut field, &mut pop, &eco);
+        assert_eq!(pop.len(), 0);
+        assert!((field.get(space.index(c)) - expected).abs() < 1e-6);
     }
 }
