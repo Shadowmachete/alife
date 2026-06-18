@@ -7,3 +7,4 @@ pub mod genome;
 pub mod params;
 pub mod organism;
 pub mod population;
+pub mod ecology;
