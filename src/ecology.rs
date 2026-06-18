@@ -10,6 +10,7 @@ use crate::field::Field;
 use crate::organism::Organism;
 use crate::params::EcoParams;
 use crate::population::Population;
+use crate::rng::Rng;
 use crate::space::Space;
 
 /// Autotrophy: each organism with an autotroph fraction `(1 - diet)` draws
@@ -65,6 +66,37 @@ pub fn cull_and_recycle<S: Space>(
     pop.retain(|o| o.is_alive(eco));
 }
 
+/// Each organism moves with probability `speed` toward its richest in-bounds
+/// planar neighbour (gradient ascent on valaar). Moving costs `move_cost·speed`.
+/// Neighbours never cross layers, so organisms stay on their layer.
+pub fn move_organisms<S: Space>(
+    space: &S,
+    field: &Field,
+    pop: &mut Population,
+    eco: &EcoParams,
+    rng: &mut Rng,
+) {
+    for o in pop.organisms_mut() {
+        // Draw first so the rng stream advances once per organism regardless.
+        if rng.next_unit() >= o.genome.speed {
+            continue;
+        }
+        let mut best = o.pos;
+        let mut best_v = field.get(space.index(o.pos));
+        for n in space.planar_neighbors(o.pos) {
+            let v = field.get(space.index(n));
+            if v > best_v {
+                best_v = v;
+                best = n;
+            }
+        }
+        if best != o.pos {
+            o.pos = best;
+            o.energy -= eco.move_cost * o.genome.speed;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -72,6 +104,7 @@ mod tests {
     use crate::organism::{Organism, TraitOrganism};
     use crate::params::EcoParams;
     use crate::population::Population;
+    use crate::rng::Rng;
     use crate::space::{Coord, Grid2p5D, Layer, Space};
 
     // [size, valaar_efficiency, speed, diet, repro_threshold, lifespan]
@@ -173,5 +206,39 @@ mod tests {
         cull_and_recycle(&space, &mut field, &mut pop, &eco);
         assert_eq!(pop.len(), 0);
         assert!((field.get(space.index(c)) - expected).abs() < 1e-6);
+    }
+
+    #[test]
+    fn moves_uphill_toward_richer_valaar() {
+        let space = Grid2p5D::new(4, 1);
+        let eco = EcoParams::default();
+        let mut field = crate::field::Field::zeros(space.len());
+        // Increasing valaar to the right.
+        for x in 0..4u32 {
+            field.set(space.index(Coord::new(x, 0, Layer::Surface)), x as f32);
+        }
+        let start = Coord::new(1, 0, Layer::Surface);
+        let mut pop = Population::new();
+        // speed 1.0 => always moves.
+        pop.spawn(TraitOrganism::new(Genome::from_array([0.5, 1.0, 1.0, 0.0, 0.9, 0.5]), start, 5.0));
+        let mut rng = Rng::new(1);
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng);
+        assert_eq!(pop.organisms()[0].pos, Coord::new(2, 0, Layer::Surface));
+        assert!(pop.organisms()[0].energy < 5.0, "moving costs energy");
+    }
+
+    #[test]
+    fn at_local_max_it_stays_put() {
+        let space = Grid2p5D::new(4, 1);
+        let eco = EcoParams::default();
+        let mut field = crate::field::Field::zeros(space.len());
+        let peak = Coord::new(2, 0, Layer::Surface);
+        field.set(space.index(peak), 100.0);
+        let mut pop = Population::new();
+        pop.spawn(TraitOrganism::new(Genome::from_array([0.5, 1.0, 1.0, 0.0, 0.9, 0.5]), peak, 5.0));
+        let mut rng = Rng::new(1);
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng);
+        assert_eq!(pop.organisms()[0].pos, peak);
+        assert_eq!(pop.organisms()[0].energy, 5.0, "no move, no cost");
     }
 }
