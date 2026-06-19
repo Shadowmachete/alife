@@ -86,6 +86,57 @@ impl CellType {
     }
 }
 
+/// A `CellType` per cell, sized to a `Space` (all layers), plus the metadata
+/// needed to persist and render it standalone. Parallels `field::Field`: a flat
+/// vector indexed via `Space::index`.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct TerrainMap {
+    #[serde(rename = "w")]
+    width: u32,
+    #[serde(rename = "h")]
+    height: u32,
+    layers: u32,
+    seed: u64,
+    cells: Vec<CellType>,
+}
+
+impl TerrainMap {
+    /// A map of `len` cells (= `space.len()`) all set to `fill`.
+    pub fn filled(len: usize, width: u32, height: u32, fill: CellType, seed: u64) -> Self {
+        let plane = width as usize * height as usize;
+        let layers = if plane == 0 { 0 } else { (len / plane) as u32 };
+        TerrainMap { width, height, layers, seed, cells: vec![fill; len] }
+    }
+
+    pub fn width(&self) -> u32 {
+        self.width
+    }
+    pub fn height(&self) -> u32 {
+        self.height
+    }
+    pub fn layers(&self) -> u32 {
+        self.layers
+    }
+    pub fn seed(&self) -> u64 {
+        self.seed
+    }
+    pub fn len(&self) -> usize {
+        self.cells.len()
+    }
+    pub fn is_empty(&self) -> bool {
+        self.cells.is_empty()
+    }
+    pub fn get(&self, i: usize) -> CellType {
+        self.cells[i]
+    }
+    pub fn set(&mut self, i: usize, t: CellType) {
+        self.cells[i] = t;
+    }
+    pub fn cells(&self) -> &[CellType] {
+        &self.cells
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -120,5 +171,31 @@ mod tests {
         for t in CellType::ALL {
             assert!(seen.insert(t.fallback_rgb()), "duplicate colour for {t:?}");
         }
+    }
+
+    use crate::space::{Coord, Grid2p5D, Layer, Space};
+
+    #[test]
+    fn filled_map_is_uniform_and_sized_to_space() {
+        let space = Grid2p5D::new(4, 3);
+        let map = TerrainMap::filled(space.len(), 4, 3, CellType::Ocean, 42);
+        assert_eq!(map.len(), space.len());
+        assert_eq!(map.width(), 4);
+        assert_eq!(map.height(), 3);
+        assert_eq!(map.layers(), 2);
+        assert_eq!(map.seed(), 42);
+        for i in 0..map.len() {
+            assert_eq!(map.get(i), CellType::Ocean);
+        }
+    }
+
+    #[test]
+    fn set_get_round_trips_through_space_index() {
+        let space = Grid2p5D::new(4, 3);
+        let mut map = TerrainMap::filled(space.len(), 4, 3, CellType::Ocean, 0);
+        let c = Coord::new(2, 1, Layer::Surface);
+        map.set(space.index(c), CellType::Rasconne);
+        assert_eq!(map.get(space.index(c)), CellType::Rasconne);
+        assert_eq!(map.get(space.index(Coord::new(0, 0, Layer::Underground))), CellType::Ocean);
     }
 }
