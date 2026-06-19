@@ -22,7 +22,7 @@ const RIVER_COUNT: u32 = 6;
 /// Maximum length (steps) of each river. [A4]
 const RIVER_MAX_LEN: u32 = 600;
 /// Decorrelates the river RNG from any other use of the seed.
-const RIVER_SALT: u64 = 0x5249_5645_52; // "RIVER"
+const RIVER_SALT: u64 = 0x52_49_56_45_52; // "RIVER"
 /// Surface land beyond this fraction of the half-min-dimension becomes Dusk rock. [A5]
 const DUSK_FRACTION: f32 = 0.55;
 
