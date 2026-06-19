@@ -39,7 +39,7 @@ heterogeneity, trade-offs, isolation→speciation, trophic levels, disturbance).
 | 1 | World substrate — 2.5D space (`Surface`/`Underground` layers) + diffusing valaar field | ✅ done |
 | 2 | Organisms + ecology — trait-vector genome, energy economy, implicit selection | ✅ done |
 | 3 | Climate + the 6-arh seasons — heat/water fields, tolerance genes, seasonal stress | ✅ done |
-| 4 | Static geography — terrain map (cell type + valaar conductivity + passability), sketch-driven generator, interactive map viewer | 🚧 in progress |
+| 4 | Static geography — terrain map (cell type + valaar conductivity + passability), sketch-driven generator, interactive map viewer | ✅ done |
 | 5+ | Terrain-aware ecology (oceans as barriers → speciation), dynamic geography, the valaar state-machine, the natural-history/timeline layer | 🔮 future |
 
 Plans live in `docs/plans/`. Organisms sit behind a clade-agnostic `Organism`
@@ -78,14 +78,16 @@ cargo run --bin sim
 cargo run --example heatmap
 ```
 
-Plan 4 adds:
+Static geography (plan 4):
 
 ```sh
-# Generate the static world from a sketch and save it (out/alchaea.json)
+# Generate the static world from a Tiled sketch and save it (out/alchaea.json)
 cargo run --bin mapgen [sketch.json]
 
 # Open the interactive map viewer: drag to pan, scroll to zoom,
-# Tab toggles Surface/Underground, Esc quits.
+# Tab toggles Surface/Underground, Esc quits. (Generates from the starter
+# sketch if no map exists yet.) Cells are solid palette colours for now;
+# textured 16×16 tiles drop in later.
 cargo run --bin mapview [map.json]
 ```
 
