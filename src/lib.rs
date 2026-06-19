@@ -13,3 +13,4 @@ pub mod season;
 pub mod climate;
 pub mod terrain;
 pub mod sketch;
+pub mod worldgen;
