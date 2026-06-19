@@ -112,7 +112,7 @@ mod tests {
     use crate::space::{Coord, Layer};
 
     fn genome_with(size: f32, lifespan: f32) -> Genome {
-        Genome::from_array([size, 0.5, 0.5, 0.5, 0.5, lifespan])
+        Genome::from_array([size, 0.5, 0.5, 0.5, 0.5, lifespan, 0.5, 0.5])
     }
 
     #[test]

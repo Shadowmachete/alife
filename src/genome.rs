@@ -5,7 +5,7 @@
 use crate::rng::Rng;
 
 /// Number of scalar traits in the genome.
-pub const TRAIT_COUNT: usize = 6;
+pub const TRAIT_COUNT: usize = 8;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Genome {
@@ -21,6 +21,10 @@ pub struct Genome {
     pub repro_threshold: f32,
     /// Maps (via EcoParams) to a maximum age in ticks.
     pub lifespan: f32,
+    /// Resistance to heat stress (0 = none, 1 = immune within range).
+    pub heat_tolerance: f32,
+    /// Resistance to drought (high = needs little water).
+    pub drought_tolerance: f32,
 }
 
 impl Genome {
@@ -32,6 +36,8 @@ impl Genome {
             diet: a[3],
             repro_threshold: a[4],
             lifespan: a[5],
+            heat_tolerance: a[6],
+            drought_tolerance: a[7],
         }
     }
 
@@ -43,6 +49,8 @@ impl Genome {
             self.diet,
             self.repro_threshold,
             self.lifespan,
+            self.heat_tolerance,
+            self.drought_tolerance,
         ]
     }
 
@@ -81,14 +89,16 @@ mod tests {
 
     #[test]
     fn round_trips_through_array() {
-        let g = Genome::from_array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
-        assert_eq!(g.to_array(), [0.1, 0.2, 0.3, 0.4, 0.5, 0.6]);
+        let g = Genome::from_array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]);
+        assert_eq!(g.to_array(), [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8]);
         assert_eq!(g.diet, 0.4);
+        assert_eq!(g.heat_tolerance, 0.7);
+        assert_eq!(g.drought_tolerance, 0.8);
     }
 
     #[test]
     fn clamped_pins_to_unit_interval() {
-        let g = Genome::from_array([-1.0, 2.0, 0.5, 0.5, 0.5, 0.5]).clamped();
+        let g = Genome::from_array([-1.0, 2.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]).clamped();
         assert_eq!(g.size, 0.0);
         assert_eq!(g.valaar_efficiency, 1.0);
         assert_eq!(g.speed, 0.5);
@@ -107,7 +117,7 @@ mod tests {
     #[test]
     fn mutate_stays_in_bounds_even_from_extremes() {
         let mut r = Rng::new(5);
-        let g = Genome::from_array([0.0, 1.0, 0.0, 1.0, 0.0, 1.0]);
+        let g = Genome::from_array([0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0]);
         for _ in 0..200 {
             let m = g.mutate(&mut r, 0.1);
             for t in m.to_array() {
@@ -119,7 +129,7 @@ mod tests {
     #[test]
     fn mutate_with_zero_rate_is_identity() {
         let mut r = Rng::new(5);
-        let g = Genome::from_array([0.2, 0.3, 0.4, 0.5, 0.6, 0.7]);
+        let g = Genome::from_array([0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.2, 0.9]);
         assert_eq!(g.mutate(&mut r, 0.0), g);
     }
 }

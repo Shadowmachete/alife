@@ -25,7 +25,7 @@ fn seeded_sim(seed: u64) -> Sim<Grid2p5D> {
         let gy = (h / 2).saturating_sub(3) + (rng.next_unit() * 6.0) as u32;
         let pos = Coord::new(gx.min(w - 1), gy.min(h - 1), Layer::Surface);
         // Low diet (autotroph), moderate everything else.
-        let g = Genome::from_array([0.4, 0.7, 0.3, 0.2, 0.5, 0.6]);
+        let g = Genome::from_array([0.4, 0.7, 0.3, 0.2, 0.5, 0.6, 0.6, 0.6]);
         sim.seed_organism(TraitOrganism::new(g, pos, sim.eco.initial_energy));
     }
     sim

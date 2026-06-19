@@ -62,7 +62,7 @@ mod tests {
     use crate::space::{Coord, Grid2p5D, Layer, Space};
 
     fn org_at(c: Coord) -> TraitOrganism {
-        TraitOrganism::new(Genome::from_array([0.5; 6]), c, 1.0)
+        TraitOrganism::new(Genome::from_array([0.5; 8]), c, 1.0)
     }
 
     #[test]
