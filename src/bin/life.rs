@@ -30,24 +30,28 @@ fn main() {
         sim.seed_organism(TraitOrganism::new(g, pos, sim.eco.initial_energy));
     }
 
-    println!("tick   pop   mean_size mean_diet mean_eff");
-    for tick in 0..=600 {
+    println!("tick  season   pop   mean_size mean_diet mean_heat_tol mean_drought_tol");
+    for tick in 0..=alife::season::CRAWS_PER_YEAR * 2 {
         if tick % 50 == 0 {
             let n = sim.pop.len().max(1) as f32;
             let mut s = 0.0;
             let mut d = 0.0;
-            let mut e = 0.0;
+            let mut ht = 0.0;
+            let mut dt = 0.0;
             for o in sim.pop.organisms() {
                 s += o.genome.size;
                 d += o.genome.diet;
-                e += o.genome.valaar_efficiency;
+                ht += o.genome.heat_tolerance;
+                dt += o.genome.drought_tolerance;
             }
             println!(
-                "{tick:>4}  {:>4}   {:>8.3} {:>8.3} {:>8.3}",
+                "{tick:>4}  {:>7?}  {:>4}   {:>8.3} {:>8.3} {:>12.3} {:>15.3}",
+                sim.season(),
                 sim.pop.len(),
                 s / n,
                 d / n,
-                e / n,
+                ht / n,
+                dt / n,
             );
         }
         sim.step();

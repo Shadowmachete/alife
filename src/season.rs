@@ -10,7 +10,7 @@ pub const ARHS_PER_YEAR: u32 = 6;
 pub const CRAWS_PER_YEAR: u32 = CRAWS_PER_ARH * ARHS_PER_YEAR;
 
 /// The six arhs, in order. Each rewards a different adaptation.
-#[derive(Copy, Clone, PartialEq, Eq, Debug)]
+#[derive(Copy, Clone, PartialEq, Eq, Hash, Debug)]
 pub enum Season {
     Rasgun,
     Goscon,
