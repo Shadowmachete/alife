@@ -10,3 +10,4 @@ pub mod population;
 pub mod ecology;
 pub mod sim;
 pub mod season;
+pub mod climate;
