@@ -137,6 +137,22 @@ impl TerrainMap {
     }
 }
 
+use std::io;
+use std::path::Path;
+
+/// Write `map` as JSON (`{w, h, layers, seed, cells:[...]}`).
+pub fn save_json(map: &TerrainMap, path: &Path) -> io::Result<()> {
+    let json = serde_json::to_string(map)
+        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    std::fs::write(path, json)
+}
+
+/// Read a `TerrainMap` back from a JSON file written by `save_json`.
+pub fn load_json(path: &Path) -> io::Result<TerrainMap> {
+    let s = std::fs::read_to_string(path)?;
+    serde_json::from_str(&s).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,5 +213,28 @@ mod tests {
         map.set(space.index(c), CellType::Rasconne);
         assert_eq!(map.get(space.index(c)), CellType::Rasconne);
         assert_eq!(map.get(space.index(Coord::new(0, 0, Layer::Underground))), CellType::Ocean);
+    }
+
+    #[test]
+    fn json_round_trips_through_a_file() {
+        let space = Grid2p5D::new(5, 4);
+        let mut map = TerrainMap::filled(space.len(), 5, 4, CellType::Land, 0xABCD);
+        map.set(space.index(Coord::new(2, 2, Layer::Surface)), CellType::Rasconne);
+        map.set(space.index(Coord::new(0, 0, Layer::Surface)), CellType::Ocean);
+
+        let path = std::env::temp_dir().join("alife_terrain_roundtrip.json");
+        save_json(&map, &path).unwrap();
+        let loaded = load_json(&path).unwrap();
+        assert_eq!(loaded, map);
+        let _ = std::fs::remove_file(&path);
+    }
+
+    #[test]
+    fn json_uses_lowercase_type_names() {
+        let space = Grid2p5D::new(1, 1);
+        let map = TerrainMap::filled(space.len(), 1, 1, CellType::Ocean, 0);
+        let json = serde_json::to_string(&map).unwrap();
+        assert!(json.contains("\"ocean\""), "got {json}");
+        assert!(json.contains("\"w\":1"));
     }
 }
