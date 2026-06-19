@@ -7,6 +7,7 @@
 //! `Rng` seeded from `seed`, so the canonical `ALCHAEA_SEED` always rebuilds the
 //! same world.
 
+use crate::rng::Rng;
 use crate::sketch::Sketch;
 use crate::space::{Coord, Grid2p5D, Layer, Space};
 use crate::terrain::{CellType, TerrainMap};
@@ -16,6 +17,14 @@ pub const ALCHAEA_SEED: u64 = 0x00A1_C4EA;
 
 /// Radius (cells) of the Rasconne core stamped at the map centre. [A3]
 const RASCONNE_RADIUS: i32 = 2;
+/// Number of valaar rivers traced from the core. [A4]
+const RIVER_COUNT: u32 = 6;
+/// Maximum length (steps) of each river. [A4]
+const RIVER_MAX_LEN: u32 = 600;
+/// Decorrelates the river RNG from any other use of the seed.
+const RIVER_SALT: u64 = 0x5249_5645_52; // "RIVER"
+/// Surface land beyond this fraction of the half-min-dimension becomes Dusk rock. [A5]
+const DUSK_FRACTION: f32 = 0.55;
 
 /// Generate a full-resolution terrain map from a coarse sketch.
 pub fn generate(sketch: &Sketch, width: u32, height: u32, seed: u64) -> TerrainMap {
@@ -24,6 +33,8 @@ pub fn generate(sketch: &Sketch, width: u32, height: u32, seed: u64) -> TerrainM
     upscale_surface(&space, &mut map, sketch);
     let center = (width / 2, height / 2);
     stamp_rasconne(&space, &mut map, center);
+    trace_rivers(&space, &mut map, center, seed);
+    mark_dusk(&space, &mut map, center);
     fill_underground(&space, &mut map);
     map
 }
@@ -69,6 +80,53 @@ fn fill_underground<S: Space>(space: &S, map: &mut TerrainMap) {
     for y in 0..h {
         for x in 0..w {
             map.set(space.index(Coord::new(x, y, Layer::Underground)), CellType::Rock);
+        }
+    }
+}
+
+/// Trace seeded, gently-meandering rivers from the core outward. Each stops at
+/// ocean, a mountain, or the edge; rivers flow through (not over) Rasconne. [A4]
+fn trace_rivers<S: Space>(space: &S, map: &mut TerrainMap, center: (u32, u32), seed: u64) {
+    let mut rng = Rng::new(seed ^ RIVER_SALT);
+    let (w, h) = (map.width() as i32, map.height() as i32);
+    for _ in 0..RIVER_COUNT {
+        let mut angle = rng.next_unit() * std::f32::consts::TAU;
+        let mut fx = center.0 as f32;
+        let mut fy = center.1 as f32;
+        for _ in 0..RIVER_MAX_LEN {
+            angle += (rng.next_unit() - 0.5) * 0.5; // gentle meander
+            fx += angle.cos();
+            fy += angle.sin();
+            let (x, y) = (fx.round() as i32, fy.round() as i32);
+            if x < 0 || y < 0 || x >= w || y >= h {
+                break;
+            }
+            let i = space.index(Coord::new(x as u32, y as u32, Layer::Surface));
+            match map.get(i) {
+                CellType::Ocean | CellType::Mountain => break,
+                CellType::Rasconne => continue,
+                _ => map.set(i, CellType::River),
+            }
+        }
+    }
+}
+
+/// Fade surface `Land` beyond the Dusk radius into `Rock` — the oligotrophic
+/// periphery. Rivers, ocean, mountains, and the core are left alone. [A5]
+fn mark_dusk<S: Space>(space: &S, map: &mut TerrainMap, center: (u32, u32)) {
+    let (w, h) = (map.width(), map.height());
+    let threshold = DUSK_FRACTION * (w.min(h) as f32) * 0.5;
+    for y in 0..h {
+        for x in 0..w {
+            let i = space.index(Coord::new(x, y, Layer::Surface));
+            if map.get(i) != CellType::Land {
+                continue;
+            }
+            let dx = x as f32 - center.0 as f32;
+            let dy = y as f32 - center.1 as f32;
+            if (dx * dx + dy * dy).sqrt() > threshold {
+                map.set(i, CellType::Rock);
+            }
         }
     }
 }
@@ -134,5 +192,45 @@ mod tests {
         let a = generate(&land_in_ocean(6, 6), 24, 24, ALCHAEA_SEED);
         let b = generate(&land_in_ocean(6, 6), 24, 24, ALCHAEA_SEED);
         assert_eq!(a, b, "same sketch + seed must give an identical map");
+    }
+
+    fn surface_counts(map: &TerrainMap, space: &Grid2p5D) -> std::collections::HashMap<CellType, u32> {
+        let mut counts = std::collections::HashMap::new();
+        for y in 0..map.height() {
+            for x in 0..map.width() {
+                let t = map.get(space.index(Coord::new(x, y, Layer::Surface)));
+                *counts.entry(t).or_insert(0) += 1;
+            }
+        }
+        counts
+    }
+
+    fn all_land(cw: u32, ch: u32) -> Sketch {
+        Sketch { width: cw, height: ch, regions: vec![CellType::Land; (cw * ch) as usize] }
+    }
+
+    #[test]
+    fn rivers_and_dusk_appear_on_an_all_land_continent() {
+        let space = Grid2p5D::new(40, 40);
+        let map = generate(&all_land(4, 4), 40, 40, ALCHAEA_SEED);
+        let counts = surface_counts(&map, &space);
+        assert!(counts.get(&CellType::River).copied().unwrap_or(0) > 0, "rivers should be traced");
+        assert!(counts.get(&CellType::Rock).copied().unwrap_or(0) > 0, "the Dusk should appear at the edge");
+        assert!(counts.get(&CellType::Land).copied().unwrap_or(0) > 0, "the core ring stays land");
+    }
+
+    #[test]
+    fn rivers_never_overwrite_the_ocean() {
+        let space = Grid2p5D::new(40, 40);
+        let mut bordered = vec![CellType::Land; 16];
+        for k in 0..4 {
+            bordered[k] = CellType::Ocean;
+            bordered[12 + k] = CellType::Ocean;
+            bordered[k * 4] = CellType::Ocean;
+            bordered[k * 4 + 3] = CellType::Ocean;
+        }
+        let sketch = Sketch { width: 4, height: 4, regions: bordered };
+        let map = generate(&sketch, 40, 40, ALCHAEA_SEED);
+        assert_eq!(map.get(space.index(Coord::new(0, 0, Layer::Surface))), CellType::Ocean);
     }
 }
