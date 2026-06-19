@@ -5,6 +5,12 @@
 > (b) match the Alchaea lore, and (c) drop into the engine without renaming. The
 > engine is the source of truth: a tile = one `CellType`. Author files named to
 > match the enum below and the renderer is a trivial `CellType → PNG` lookup.
+>
+> **Status:** the plan-4 interactive viewer currently paints each cell as a
+> **solid palette colour** (`CellType::fallback_rgb`) — no art needed to use it.
+> These 16×16 tiles are the *textured drop-in*: once drawn, they replace the
+> solid colours in the same `CellType` slots (a small follow-up), so nothing you
+> author here is wasted.
 
 ---
 
@@ -44,9 +50,8 @@ want different names/splits, tell me and I'll match the enum to your art — but
 - **Top-down orthogonal view** (not isometric). The world is a plain `(x, y)`
   grid (`Grid2p5D`), rendered row-by-row like the existing `examples/heatmap.rs`.
   Isometric would fight the data model.
-- **Square, power-of-two: 32×32 px.** Big enough for a few shades of detail,
-  small enough that a 60×30-ish map fits on screen and scales crisply by integer
-  factors (×2, ×3). 16×16 is fine if you want a denser map; pick one and keep
+- **Square: 16×16 px** (the decided size; matches `viewer::CELL_PX`). Denser maps
+  on screen, faster to hand-draw; scales crisply by integer factors (×2, ×3). Keep
   **every tile identical in size**.
 - **PNG, RGBA** (transparency only matters for overlays/props; base terrain can
   be fully opaque).
@@ -130,7 +135,7 @@ desaturated grey-violet, and Rasconne is hot (orange→magenta).
 
 1. **Lock the tile set** (§1) — confirm names with me so the enum matches.
 2. **Pick a palette** on Lospec (~16 colours), tuned to the glow-vs-drab idea.
-3. **Set canvas = 32×32**, light from one direction.
+3. **Set canvas = 16×16**, light from one direction.
 4. For each tile: block the base value, add 2–3 shades, keep edges tileable
    (offset-check the seams).
 5. **Variants** for `land`/`ocean`/`rock` (×2–3) to kill repetition.

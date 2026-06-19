@@ -1,58 +1,60 @@
-# Static Geography (sketch-driven worldgen + map visualiser) Implementation Plan
+# Static Geography (sketch-driven worldgen + interactive map viewer) Implementation Plan
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Give the world a fixed *abiotic stage* — a per-cell **terrain map** (continents, oceans, valaar rivers, the central Rasconne core) authored from a hand-drawn sketch by a deterministic, lore-constrained generator, saved to JSON, and rendered to PNG with the project's first real tile renderer.
+**Goal:** Give the world a fixed *abiotic stage* — a per-cell **terrain map** (continents, oceans, valaar rivers, the central Rasconne core) authored from a hand-drawn sketch by a deterministic, lore-constrained generator, saved to JSON, and explored in an **interactive pan/zoom map viewer** (the renderer that ships).
 
-**Architecture:** Layered on plans 1–3. A new `CellType` enum and a `TerrainMap` (a `Field`-shaped grid of `CellType` over the existing `Space`) describe the stage; each `CellType` carries a *valaar conductivity* and *passability* that **plan 5** will feed into diffusion and movement (this plan only authors and visualises the data — the ecology stays terrain-blind). A `worldgen` module reads a **Tiled** sketch (JSON), upscales it, stamps a central Rasconne, traces seeded rivers outward, and fades the periphery into the Dusk. A `render` module composites 32 px tile PNGs (with a solid-colour fallback) into one image per layer. A `mapgen` binary wires sketch → generate → save JSON → render PNGs. Generation is seeded and reproducible (canonical seed = "the Alchaea").
+**Architecture:** Layered on plans 1–3. A new `CellType` enum and a `TerrainMap` (a `Field`-shaped grid of `CellType` over the existing `Space`) describe the stage; each `CellType` carries a *valaar conductivity* and *passability* that **plan 5** will feed into diffusion and movement (this plan only authors and visualises the data — the ecology stays terrain-blind). A `worldgen` module reads a **Tiled** sketch (JSON), upscales it, stamps a central Rasconne, traces seeded rivers outward, and fades the periphery into the Dusk. A `viewer` module is a **pure, testable** pan/zoom camera + framebuffer renderer that paints each 16×16 cell as a solid palette colour (`CellType::fallback_rgb`); `bin/mapview` is the thin `minifb` window/input shell around it (drag-pan, scroll-zoom, layer toggle) — the renderer the project will keep and later grow to draw the live simulation. Generation is seeded and reproducible (canonical seed = "the Alchaea").
 
-**Tech Stack:** Rust (edition 2021). This plan **admits three external crates, scoped to map I/O and rendering only** (`serde`, `serde_json`, `image`); the simulation engine (plans 1–3) stays std-only.
+**Tech Stack:** Rust (edition 2021). This plan **admits three external crates, scoped to map I/O and the viewer window only** (`serde`, `serde_json`, `minifb`); the simulation engine (plans 1–3) and the viewer *core* stay std-only.
 
 **Project root:** `~/dev/alife/`. All paths relative to it.
 
-**Design source:** `~/dev/ideas/world-design.md` §F (geography: 3–5 continents from Alchaea's break-up; oceans = barriers; zones centre→edge **Rasconne core → river corridors → the Dusk → Underground**) and the plan-3 doc's "Plan 4 — static geography" section. Tile vocabulary + style: `docs/tile-design-guide.md`.
+**Design source:** `~/dev/ideas/world-design.md` §F (geography: 3–5 continents from Alchaea's break-up; oceans = barriers; zones centre→edge **Rasconne core → river corridors → the Dusk → Underground**). Palette + tile vocabulary: `docs/tile-design-guide.md`.
 
 **Builds on (plans 1–3, shipped — exact interfaces consumed):**
 
 - `space::{Coord, Layer, Space, Grid2p5D}` — `Layer::{Surface, Underground}`, `Grid2p5D::new(w, h)`, `Space::{width, height, len, index, in_bounds, planar_neighbors}`.
 - `field::Field` — the shape `TerrainMap` parallels (flat `Vec`, indexed via `Space::index`).
 - `rng::Rng` — `new(seed: u64)`, `next_u64`, `next_unit() -> f32` (in `[0,1)`), `next_range(lo, hi)`. The generator's only randomness; keeps determinism without a new RNG.
-- `world::{World, Params}`, `valaar::{diffuse_planar, …}`, `sim::Sim` — **not touched here**; plan 5 wires terrain into them.
+- `world`, `valaar`, `ecology`, `sim` — **not touched here**; plan 5 wires terrain into them.
 
 ## Global Constraints
 
 - **Language:** Rust, edition 2021.
-- **Dependencies (scoped relaxation):** this plan adds exactly three crates, used **only** in the new `terrain` (JSON I/O), `sketch` (Tiled parse), and `render` (PNG) modules:
-  - `serde = { version = "1", features = ["derive"] }`
-  - `serde_json = "1"`
-  - `image = { version = "0.25", default-features = false, features = ["png"] }`
-  No other crates. The plan-1/2/3 engine modules (`space`, `field`, `world`, `valaar`, `genome`, `ecology`, `sim`, `season`, `climate`, …) **must remain std-only** — none of them may `use serde::` or `use image::`.
-- **Determinism:** `worldgen::generate(sketch, w, h, seed)` is a pure function of its inputs. Same sketch + dims + seed ⇒ byte-identical `TerrainMap`. Randomness comes only from `Rng::new(seed ^ salt)`. `serde_json` output is field-order-stable. Identical inputs ⇒ identical JSON and identical PNG.
-- **Spatial access stays behind `Space`:** `TerrainMap` is a flat `Vec<CellType>` indexed via `Space::index`; `worldgen` and `render` iterate `(x, y, layer)` and call `space.index(...)`. No module assumes the `Grid2p5D` memory layout directly.
-- **Terrain is the stage, not the simulation:** this plan **does not** modify `valaar::diffuse_planar` or `ecology::move_organisms`. `CellType::conductivity()` / `passable()` exist and are tested, but nothing consumes them yet (plan 5 does). No `EcoParams`/`Sim` changes.
-- **Runs before the art exists:** the renderer falls back to solid palette colours when a tile PNG is missing, so the whole pipeline is runnable and testable now. Real tiles drop into `assets/tiles/<stem>.png` later with zero code change.
+- **Dependencies (scoped relaxation):** this plan adds exactly three crates:
+  - `serde = { version = "1", features = ["derive"] }` — used only in `terrain` (JSON model) and `sketch` (Tiled parse).
+  - `serde_json = "1"` — used only in `terrain` (save/load) and `sketch`.
+  - `minifb = "0.27"` — used only in `bin/mapview.rs` (the window).
+  No other crates. The plan-1/2/3 engine modules **and `src/viewer.rs`** must remain std-only (the viewer *core* produces a pixel buffer; only the *binary* touches `minifb`). No engine module may `use serde::` or `use minifb::`.
+- **Determinism:** `worldgen::generate(sketch, w, h, seed)` is a pure function of its inputs — same inputs ⇒ byte-identical `TerrainMap` and identical JSON. Randomness comes only from `Rng::new(seed ^ salt)`.
+- **`cargo test` stays headless:** all tests are pure (no window). The interactive viewer is exercised only through its testable core (`Camera` + `render_to_buffer`); the `mapview` binary is verified by **building** it, not by opening a window in CI.
+- **Spatial access stays behind `Space`:** `TerrainMap` is a flat `Vec<CellType>` indexed via `Space::index`; `worldgen` and `viewer` iterate `(x, y, layer)` and call `space.index(...)`.
+- **Terrain is the stage, not the simulation:** this plan does **not** modify `valaar::diffuse_planar` or `ecology::move_organisms`. `CellType::conductivity()` / `passable()` exist and are tested, but nothing consumes them yet (plan 5 does).
+- **Solid colours now, textured tiles later:** the viewer paints each cell with `CellType::fallback_rgb` (the `docs/tile-design-guide.md` palette). Hand-drawn 16×16 PNG tiles are a later enhancement that will slot into the same `CellType`s without changing this plan's data flow.
 - **Version control:** commit per task. Plain commit messages, **no `Co-Authored-By` trailer** (global user preference).
 
 **Scope (plan 4 of several) — what's DEFERRED, and to which plan:**
 
-- **Plan 5 — terrain-aware ecology (the payoff).** Make `valaar::diffuse_planar` weight exchange by `CellType::conductivity()` (rivers conduct, oceans/mountains block) and `ecology::move_organisms` respect `passable()` (oceans become real barriers → allopatric speciation). This is why conductivity/passability are authored now.
-- **Plan 5+ — the dynamic world:** Vraze land-bridges + earthquakes mutating the terrain; underground reservoirs/caves as a climate refuge + the `digging` gene; the valaar state-machine.
-- **Deferred tiles:** `coast` (land/ocean transition) and `cave` (underground access) `CellType`s — add when needed; the enum is `non_exhaustive`-friendly to extend.
+- **Plan 5 — terrain-aware ecology (the payoff).** Weight `valaar::diffuse_planar` by `CellType::conductivity()` (rivers conduct, oceans/mountains block) and gate `ecology::move_organisms` on `passable()` (oceans become real barriers → allopatric speciation). This is why conductivity/passability are authored now.
+- **Textured tile rendering:** load 16×16 PNG tiles from `assets/tiles/` into the viewer (replacing solid colours). Small follow-up once the art exists.
+- **Live-simulation viewer:** grow `viewer`/`mapview` to draw the running sim (organisms + changing fields, play/pause). The pan/zoom camera built here is the foundation.
+- **Plan 5+ — the dynamic world:** Vraze land-bridges + earthquakes; underground reservoirs/caves + the `digging` gene; the valaar state-machine.
 
 ---
 
 ## Design assumptions (flagged for veto)
 
-- **A1 — CellType set:** `{ Ocean, Land, River, Rock, Mountain, Rasconne }` — the tile-guide minimum set plus `Rock` (barren/Dusk ground). `Coast`/`Cave` deferred.
-- **A2 — conductivity/passability table** (Task 1): `Ocean 0.0/✗`, `Mountain 0.0/✗`, `Rock 0.3/✓`, `Land 1.0/✓`, `River 1.5/✓`, `Rasconne 2.0/✓`. Concrete and tunable; only *meaning* is fixed (oceans/mountains block valaar and movement; rivers/Rasconne conduct best). Consumed in plan 5.
+- **A1 — CellType set:** `{ Ocean, Land, River, Rock, Mountain, Rasconne }` — the tile-guide minimum plus `Rock` (barren/Dusk ground). `Coast`/`Cave` deferred.
+- **A2 — conductivity/passability table** (Task 1): `Ocean 0.0/✗`, `Mountain 0.0/✗`, `Rock 0.3/✓`, `Land 1.0/✓`, `River 1.5/✓`, `Rasconne 2.0/✓`. Concrete + tunable; only the *meaning* is fixed (oceans/mountains block; rivers/Rasconne conduct best). Consumed in plan 5.
 - **A3 — central Rasconne:** the generator stamps a Rasconne disk (radius 2) at the *map centre* regardless of the sketch, enforcing the "continents split outward from a central Rasconne" lore.
-- **A4 — rivers:** 6 seeded, gently-meandering walks from the core outward, stopping at ocean/mountain/edge. A structural + visual feature now; their high conductivity matters in plan 5.
-- **A5 — the Dusk:** surface `Land` beyond `0.55 ×` the half-min-dimension radius becomes `Rock`, painting the centre→edge oligotrophic gradient.
-- **A6 — underground layer:** filled uniformly with `Rock` (placeholder). Real underground geography (reservoirs/caves/access points) is plan 5+.
-- **A7 — sketch contract:** the Tiled tileset is laid out so global tile IDs `1..=6` map to `CellType::ALL` order (`1=Ocean, 2=Land, 3=River, 4=Rock, 5=Mountain, 6=Rasconne`); GID `0`/unknown ⇒ `Ocean`. The generator reads the **first tile layer**. (You control the sketch; this is the agreed convention.)
-- **A8 — map JSON schema:** `{ "version": 1, "w", "h", "layers": 2, "seed", "cells": ["ocean", …] }`; `cells` covers **both** layers in `Space::index` order (layer-major: surface block then underground block).
-- **A9 — tile size:** 32 px (matches `docs/tile-design-guide.md`). Renderer nearest-neighbour-resizes any off-size tile and falls back to `CellType::fallback_rgb()` when a tile file is absent.
-- **A10 — deps:** `serde`/`serde_json`/`image` admitted, scoped as in Global Constraints.
+- **A4 — rivers:** 6 seeded, gently-meandering walks from the core outward, stopping at ocean/mountain/edge.
+- **A5 — the Dusk:** surface `Land` beyond `0.55 ×` the half-min-dimension radius becomes `Rock` (the centre→edge oligotrophic gradient).
+- **A6 — underground layer:** filled uniformly with `Rock` (placeholder); real underground geography is plan 5+.
+- **A7 — sketch contract:** the Tiled tileset is laid out so global tile IDs `1..=6` map to `CellType::ALL` order (`1=Ocean … 6=Rasconne`); GID `0`/unknown ⇒ `Ocean`. The generator reads the **first tile layer**.
+- **A8 — map JSON schema:** `{ "w", "h", "layers", "seed", "cells": ["ocean", …] }`; `cells` covers **both** layers in `Space::index` order (surface block then underground block).
+- **A9 — cell size:** 16 px per cell at zoom 1.0 (`viewer::CELL_PX`). Matches the 16×16 tiles in `docs/tile-design-guide.md`.
+- **A10 — viewer controls:** left-drag = pan, scroll = zoom about the cursor, `Tab` = toggle Surface/Underground, `Esc` = quit. `minifb` window, resizable.
 
 ---
 
@@ -60,15 +62,14 @@
 
 - `Cargo.toml` — **modified**: add the three dependencies (incrementally, in the task that first needs each).
 - `.gitignore` — **modified**: ignore generated `/out`.
-- `src/lib.rs` — **modified**: add `pub mod terrain; pub mod sketch; pub mod worldgen; pub mod render;`.
+- `src/lib.rs` — **modified**: add `pub mod terrain; pub mod sketch; pub mod worldgen; pub mod viewer;`.
 - `src/terrain.rs` — **new**: `CellType` (+ properties, serde) and `TerrainMap` (+ `save_json`/`load_json`).
 - `src/sketch.rs` — **new**: parse a Tiled JSON export into a coarse `Sketch` of region seeds.
 - `src/worldgen.rs` — **new**: `generate(sketch, w, h, seed) -> TerrainMap` and its lore steps.
-- `src/render.rs` — **new**: composite tile PNGs (with fallback) into an `image::RgbImage` per layer.
-- `src/bin/mapgen.rs` — **new**: CLI — sketch → generate (canonical seed) → save JSON → render PNGs.
+- `src/viewer.rs` — **new, std-only**: `Camera` (pan/zoom) + `render_to_buffer` (solid-colour framebuffer). Pure + testable.
+- `src/bin/mapgen.rs` — **new**: CLI — sketch → generate (canonical seed) → save JSON.
+- `src/bin/mapview.rs` — **new**: the interactive `minifb` viewer window.
 - `assets/sketch.json` — **new** (Task 8): a small starter Tiled sketch so the pipeline runs before your real sketch arrives.
-
-Each `src/lib.rs` edit adds one `pub mod`, shown in its task.
 
 ---
 
@@ -83,7 +84,7 @@ Each `src/lib.rs` edit adds one `pub mod`, shown in its task.
 - Consumes: nothing.
 - Produces:
   - `pub enum CellType { Ocean, Land, River, Rock, Mountain, Rasconne }` deriving `Copy, Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize` (serde `rename_all = "lowercase"`).
-  - `impl CellType`: `pub const ALL: [CellType; 6]`; `pub fn conductivity(self) -> f32`; `pub fn passable(self) -> bool`; `pub fn code(self) -> char`; `pub fn from_code(c: char) -> Option<CellType>`; `pub fn tile_stem(self) -> &'static str`; `pub fn fallback_rgb(self) -> [u8; 3]`.
+  - `impl CellType`: `pub const ALL: [CellType; 6]`; `pub fn conductivity(self) -> f32`; `pub fn passable(self) -> bool`; `pub fn code(self) -> char`; `pub fn from_code(c: char) -> Option<CellType>`; `pub fn fallback_rgb(self) -> [u8; 3]`.
 
 - [ ] **Step 1: Add the dependency**
 
@@ -136,11 +137,10 @@ mod tests {
     }
 
     #[test]
-    fn every_type_has_a_distinct_tile_stem() {
+    fn every_type_has_a_distinct_colour() {
         let mut seen = std::collections::HashSet::new();
         for t in CellType::ALL {
-            assert!(seen.insert(t.tile_stem()), "duplicate stem for {t:?}");
-            assert!(!t.tile_stem().is_empty());
+            assert!(seen.insert(t.fallback_rgb()), "duplicate colour for {t:?}");
         }
     }
 }
@@ -161,11 +161,11 @@ Insert above the `tests` module in `src/terrain.rs`:
 //! `conductivity` (how freely valaar diffuses through it) and `passable` (whether
 //! an organism may move into it). `TerrainMap` (below) is a grid of these.
 //!
-//! Authored by `worldgen`, persisted as JSON here, drawn by `render`.
+//! Authored by `worldgen`, persisted as JSON here, drawn by `viewer`.
 
 use serde::{Deserialize, Serialize};
 
-/// What fills a cell. Tile/file names are the lowercase variant (`tile_stem`).
+/// What fills a cell.
 #[derive(Copy, Clone, PartialEq, Eq, Hash, Debug, Serialize, Deserialize)]
 #[serde(rename_all = "lowercase")]
 pub enum CellType {
@@ -230,20 +230,8 @@ impl CellType {
         }
     }
 
-    /// Tile filename stem → `assets/tiles/<stem>.png`.
-    pub fn tile_stem(self) -> &'static str {
-        match self {
-            CellType::Ocean => "ocean",
-            CellType::Land => "land",
-            CellType::River => "river",
-            CellType::Rock => "rock",
-            CellType::Mountain => "mountain",
-            CellType::Rasconne => "rasconne",
-        }
-    }
-
-    /// Solid colour `[r, g, b]` used when a tile PNG is absent (palette per
-    /// `docs/tile-design-guide.md`).
+    /// Solid colour `[r, g, b]` the viewer paints for this cell (palette per
+    /// `docs/tile-design-guide.md`). Replaced by textured tiles later.
     pub fn fallback_rgb(self) -> [u8; 3] {
         match self {
             CellType::Ocean => [20, 28, 64],
@@ -265,7 +253,7 @@ Expected: `test result: ok. 4 passed`. (First build downloads `serde`.)
 - [ ] **Step 7: Commit**
 
 ```bash
-git -C ~/dev/alife add -A && git -C ~/dev/alife commit -m "feat: CellType terrain vocabulary (conductivity, passability, tiles)"
+git -C ~/dev/alife add -A && git -C ~/dev/alife commit -m "feat: CellType terrain vocabulary (conductivity, passability, palette)"
 ```
 
 ---
@@ -278,7 +266,7 @@ git -C ~/dev/alife add -A && git -C ~/dev/alife commit -m "feat: CellType terrai
 **Interfaces:**
 - Consumes: `CellType` (Task 1); `Space` (plan 1).
 - Produces:
-  - `pub struct TerrainMap` deriving `Clone, Debug, PartialEq, Serialize, Deserialize`, with serde field names `w`, `h`, `layers`, `seed`, `cells`.
+  - `pub struct TerrainMap` deriving `Clone, Debug, PartialEq, Serialize, Deserialize`, serde field names `w`, `h`, `layers`, `seed`, `cells`.
   - `pub fn filled(len: usize, width: u32, height: u32, fill: CellType, seed: u64) -> TerrainMap`.
   - `pub fn width(&self) -> u32`, `height(&self) -> u32`, `layers(&self) -> u32`, `seed(&self) -> u64`, `len(&self) -> usize`, `is_empty(&self) -> bool`.
   - `pub fn get(&self, i: usize) -> CellType`, `pub fn set(&mut self, i: usize, t: CellType)`, `pub fn cells(&self) -> &[CellType]`.
@@ -297,6 +285,7 @@ Add inside the `tests` module in `src/terrain.rs` (after the existing tests):
         assert_eq!(map.len(), space.len());
         assert_eq!(map.width(), 4);
         assert_eq!(map.height(), 3);
+        assert_eq!(map.layers(), 2);
         assert_eq!(map.seed(), 42);
         for i in 0..map.len() {
             assert_eq!(map.get(i), CellType::Ocean);
@@ -310,7 +299,6 @@ Add inside the `tests` module in `src/terrain.rs` (after the existing tests):
         let c = Coord::new(2, 1, Layer::Surface);
         map.set(space.index(c), CellType::Rasconne);
         assert_eq!(map.get(space.index(c)), CellType::Rasconne);
-        // a different cell is untouched
         assert_eq!(map.get(space.index(Coord::new(0, 0, Layer::Underground))), CellType::Ocean);
     }
 ```
@@ -452,7 +440,7 @@ Add to `src/terrain.rs`, below the `TerrainMap` impl and above the `tests` modul
 use std::io;
 use std::path::Path;
 
-/// Write `map` as JSON (`{version, w, h, layers, seed, cells:[...]}`).
+/// Write `map` as JSON (`{w, h, layers, seed, cells:[...]}`).
 pub fn save_json(map: &TerrainMap, path: &Path) -> io::Result<()> {
     let json = serde_json::to_string(map)
         .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
@@ -486,10 +474,10 @@ git -C ~/dev/alife add -A && git -C ~/dev/alife commit -m "feat: TerrainMap JSON
 - Modify: `src/lib.rs` (add `pub mod sketch;`)
 
 **Interfaces:**
-- Consumes: `CellType` (Task 1); `serde_json` (Task 3).
+- Consumes: `CellType` (Task 1); `serde`/`serde_json` (Tasks 1, 3).
 - Produces:
   - `pub struct Sketch { pub width: u32, pub height: u32, pub regions: Vec<CellType> }`.
-  - `pub fn parse_sketch(json: &str) -> Result<Sketch, String>` — reads the first tile layer of a Tiled JSON export, mapping GID `1..=6` to `CellType::ALL` (GID `0`/unknown ⇒ `Ocean`), masking Tiled's flip-flag high bits. `[ASSUMPTION A7]`
+  - `pub fn parse_sketch(json: &str) -> Result<Sketch, String>` — first tile layer of a Tiled JSON export; GID `1..=6` → `CellType::ALL`, GID `0`/unknown ⇒ `Ocean`, flip-flag high bits masked. `[ASSUMPTION A7]`
 
 - [ ] **Step 1: Add the module**
 
@@ -524,14 +512,13 @@ mod tests {
         assert_eq!(s.height, 3);
         assert_eq!(s.regions.len(), 9);
         assert_eq!(s.regions[0], CellType::Ocean); // gid 1
-        assert_eq!(s.regions[4], CellType::Rasconne); // gid 6 (centre)
+        assert_eq!(s.regions[4], CellType::Rasconne); // gid 6
         assert_eq!(s.regions[7], CellType::Land); // gid 2
         assert_eq!(s.regions[8], CellType::Mountain); // gid 5
     }
 
     #[test]
     fn flip_flag_high_bits_are_ignored() {
-        // Tiled sets the top 3 bits for flipped tiles; gid 6 flipped is still Rasconne.
         let flipped = 6u32 | 0x8000_0000;
         let json = format!(
             r#"{{"width":1,"height":1,"layers":[{{"type":"tilelayer","width":1,"height":1,"data":[{flipped}]}}]}}"#
@@ -674,12 +661,12 @@ mod tests {
     fn land_in_ocean(cw: u32, ch: u32) -> Sketch {
         let mut regions = vec![CellType::Land; (cw * ch) as usize];
         for x in 0..cw {
-            regions[x as usize] = CellType::Ocean; // top row
-            regions[((ch - 1) * cw + x) as usize] = CellType::Ocean; // bottom row
+            regions[x as usize] = CellType::Ocean;
+            regions[((ch - 1) * cw + x) as usize] = CellType::Ocean;
         }
         for y in 0..ch {
-            regions[(y * cw) as usize] = CellType::Ocean; // left col
-            regions[(y * cw + cw - 1) as usize] = CellType::Ocean; // right col
+            regions[(y * cw) as usize] = CellType::Ocean;
+            regions[(y * cw + cw - 1) as usize] = CellType::Ocean;
         }
         Sketch { width: cw, height: ch, regions }
     }
@@ -698,20 +685,14 @@ mod tests {
     fn rasconne_sits_at_the_centre() {
         let space = Grid2p5D::new(24, 24);
         let map = generate(&land_in_ocean(6, 6), 24, 24, ALCHAEA_SEED);
-        assert_eq!(
-            map.get(space.index(Coord::new(12, 12, Layer::Surface))),
-            CellType::Rasconne
-        );
+        assert_eq!(map.get(space.index(Coord::new(12, 12, Layer::Surface))), CellType::Rasconne);
     }
 
     #[test]
     fn ocean_border_survives_upscaling() {
         let space = Grid2p5D::new(24, 24);
         let map = generate(&land_in_ocean(6, 6), 24, 24, ALCHAEA_SEED);
-        assert_eq!(
-            map.get(space.index(Coord::new(0, 0, Layer::Surface))),
-            CellType::Ocean
-        );
+        assert_eq!(map.get(space.index(Coord::new(0, 0, Layer::Surface))), CellType::Ocean);
     }
 
     #[test]
@@ -720,10 +701,7 @@ mod tests {
         let map = generate(&land_in_ocean(6, 6), 24, 24, ALCHAEA_SEED);
         for x in 0..24 {
             for y in 0..24 {
-                assert_eq!(
-                    map.get(space.index(Coord::new(x, y, Layer::Underground))),
-                    CellType::Rock
-                );
+                assert_eq!(map.get(space.index(Coord::new(x, y, Layer::Underground))), CellType::Rock);
             }
         }
     }
@@ -817,10 +795,7 @@ fn fill_underground<S: Space>(space: &S, map: &mut TerrainMap) {
     let (w, h) = (map.width(), map.height());
     for y in 0..h {
         for x in 0..w {
-            map.set(
-                space.index(Coord::new(x, y, Layer::Underground)),
-                CellType::Rock,
-            );
+            map.set(space.index(Coord::new(x, y, Layer::Underground)), CellType::Rock);
         }
     }
 }
@@ -880,14 +855,13 @@ Add inside the `tests` module in `src/worldgen.rs`:
 
     #[test]
     fn rivers_never_overwrite_the_ocean() {
-        // ocean border preserved: rivers stop at the sea, never paint it.
         let space = Grid2p5D::new(40, 40);
         let mut bordered = vec![CellType::Land; 16];
         for k in 0..4 {
-            bordered[k] = CellType::Ocean; // top
-            bordered[12 + k] = CellType::Ocean; // bottom
-            bordered[k * 4] = CellType::Ocean; // left
-            bordered[k * 4 + 3] = CellType::Ocean; // right
+            bordered[k] = CellType::Ocean;
+            bordered[12 + k] = CellType::Ocean;
+            bordered[k * 4] = CellType::Ocean;
+            bordered[k * 4 + 3] = CellType::Ocean;
         }
         let sketch = Sketch { width: 4, height: 4, regions: bordered };
         let map = generate(&sketch, 40, 40, ALCHAEA_SEED);
@@ -898,11 +872,11 @@ Add inside the `tests` module in `src/worldgen.rs`:
 - [ ] **Step 2: Run to verify it fails**
 
 Run: `cd ~/dev/alife && cargo test --lib worldgen`
-Expected: **FAIL** — `rivers_and_dusk_appear_on_an_all_land_continent` finds no `River`/`Rock` (generate doesn't trace them yet). `rivers_never_overwrite_the_ocean` may already pass; that is fine.
+Expected: **FAIL** — `rivers_and_dusk_appear_on_an_all_land_continent` finds no `River`/`Rock`.
 
 - [ ] **Step 3: Write the implementation**
 
-In `src/worldgen.rs`, add `use crate::rng::Rng;` to the imports, add these consts near `RASCONNE_RADIUS`:
+In `src/worldgen.rs`, add `use crate::rng::Rng;` to the imports and these consts near `RASCONNE_RADIUS`:
 
 ```rust
 /// Number of valaar rivers traced from the core. [A4]
@@ -988,38 +962,30 @@ git -C ~/dev/alife add -A && git -C ~/dev/alife commit -m "feat: worldgen traces
 
 ---
 
-### Task 7: PNG tile renderer
+### Task 7: Viewer core — pan/zoom camera + framebuffer
 
 **Files:**
-- Create: `src/render.rs`
-- Modify: `src/lib.rs` (add `pub mod render;`)
-- Modify: `Cargo.toml` (add `image`)
+- Create: `src/viewer.rs` (std-only — no external crate here)
+- Modify: `src/lib.rs` (add `pub mod viewer;`)
 
 **Interfaces:**
 - Consumes: `TerrainMap`/`CellType` (Tasks 1–2); `space::{Coord, Layer, Space}` (plan 1).
 - Produces:
-  - `pub const TILE: u32 = 32;`
-  - `pub fn render_layer<S: Space>(map: &TerrainMap, space: &S, layer: Layer, tiles_dir: &std::path::Path) -> image::RgbImage`.
+  - `pub const CELL_PX: f32 = 16.0;` and `pub const BACKDROP: u32 = 0x0010_1014;`
+  - `pub struct Camera { pub cx: f32, pub cy: f32, pub zoom: f32 }` deriving `Clone, Copy, Debug, PartialEq` + `Default`, with `new()`, `screen_to_cell(px, py) -> (f32, f32)`, `pan_pixels(dx, dy)`, `zoom_at(px, py, factor)`.
+  - `pub fn render_to_buffer<S: Space>(map: &TerrainMap, space: &S, layer: Layer, cam: &Camera, width: u32, height: u32, buf: &mut [u32])` — fills a `0x00RRGGBB` framebuffer with solid `CellType::fallback_rgb` per cell; out-of-bounds = `BACKDROP`.
 
-- [ ] **Step 1: Add the dependency**
-
-In `Cargo.toml`, under `[dependencies]`:
-
-```toml
-image = { version = "0.25", default-features = false, features = ["png"] }
-```
-
-- [ ] **Step 2: Add the module**
+- [ ] **Step 1: Add the module**
 
 Append to `src/lib.rs`:
 
 ```rust
-pub mod render;
+pub mod viewer;
 ```
 
-- [ ] **Step 3: Write the failing tests**
+- [ ] **Step 2: Write the failing tests**
 
-Create `src/render.rs` with only the test module:
+Create `src/viewer.rs` with only the test module:
 
 ```rust
 #[cfg(test)]
@@ -1028,98 +994,173 @@ mod tests {
     use crate::space::{Coord, Grid2p5D, Layer, Space};
     use crate::terrain::{CellType, TerrainMap};
 
-    #[test]
-    fn output_is_tile_sized_and_uses_the_fallback_colour() {
+    fn pack(rgb: [u8; 3]) -> u32 {
+        ((rgb[0] as u32) << 16) | ((rgb[1] as u32) << 8) | rgb[2] as u32
+    }
+
+    fn two_by_two() -> (Grid2p5D, TerrainMap) {
         let space = Grid2p5D::new(2, 2);
         let mut map = TerrainMap::filled(space.len(), 2, 2, CellType::Ocean, 0);
         map.set(space.index(Coord::new(1, 0, Layer::Surface)), CellType::Rasconne);
-        // a tiles dir that does not exist => every tile uses fallback_rgb
-        let tiles_dir = std::env::temp_dir().join("alife_no_such_tiles_dir_q1w2e3");
-        let img = render_layer(&map, &space, Layer::Surface, &tiles_dir);
+        (space, map)
+    }
 
-        assert_eq!(img.width(), 2 * TILE);
-        assert_eq!(img.height(), 2 * TILE);
-        // centre of cell (0,0) = Ocean fallback
-        assert_eq!(img.get_pixel(TILE / 2, TILE / 2).0, CellType::Ocean.fallback_rgb());
-        // centre of cell (1,0) = Rasconne fallback
-        assert_eq!(
-            img.get_pixel(TILE + TILE / 2, TILE / 2).0,
-            CellType::Rasconne.fallback_rgb()
-        );
+    #[test]
+    fn renders_each_cell_in_its_fallback_colour() {
+        let (space, map) = two_by_two();
+        let cam = Camera::new(); // zoom 16, origin
+        let (w, h) = (32u32, 32u32); // 2 cells * 16 px
+        let mut buf = vec![0u32; (w * h) as usize];
+        render_to_buffer(&map, &space, Layer::Surface, &cam, w, h, &mut buf);
+        let at = |x: u32, y: u32| buf[(y * w + x) as usize];
+        assert_eq!(at(8, 8), pack(CellType::Ocean.fallback_rgb())); // cell (0,0)
+        assert_eq!(at(24, 8), pack(CellType::Rasconne.fallback_rgb())); // cell (1,0)
+    }
+
+    #[test]
+    fn out_of_bounds_is_backdrop() {
+        let (space, map) = two_by_two();
+        let mut cam = Camera::new();
+        cam.cx = -1.0; // shift so the top-left pixel is off-map
+        let (w, h) = (32u32, 32u32);
+        let mut buf = vec![0u32; (w * h) as usize];
+        render_to_buffer(&map, &space, Layer::Surface, &cam, w, h, &mut buf);
+        assert_eq!(buf[0], BACKDROP);
+    }
+
+    #[test]
+    fn zoom_keeps_the_point_under_the_cursor_fixed() {
+        let mut cam = Camera::new();
+        let (px, py) = (100.0, 60.0);
+        let before = cam.screen_to_cell(px, py);
+        cam.zoom_at(px, py, 2.0);
+        let after = cam.screen_to_cell(px, py);
+        assert!((before.0 - after.0).abs() < 1e-3, "x drifted: {before:?} {after:?}");
+        assert!((before.1 - after.1).abs() < 1e-3, "y drifted");
+        assert!((cam.zoom - 32.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn pan_moves_the_view_in_cells() {
+        let mut cam = Camera::new(); // zoom 16
+        cam.pan_pixels(16.0, 32.0); // drag one cell right, two down
+        assert!((cam.cx + 1.0).abs() < 1e-3);
+        assert!((cam.cy + 2.0).abs() < 1e-3);
     }
 }
 ```
 
-- [ ] **Step 4: Run to verify it fails**
+- [ ] **Step 3: Run to verify it fails**
 
-Run: `cd ~/dev/alife && cargo test --lib render`
-Expected: **compile error** — `cannot find function render_layer` / unresolved `image`.
+Run: `cd ~/dev/alife && cargo test --lib viewer`
+Expected: **compile error** — `cannot find type Camera` / function `render_to_buffer`.
 
-- [ ] **Step 5: Write the minimal implementation**
+- [ ] **Step 4: Write the minimal implementation**
 
-Insert above the `tests` module in `src/render.rs`:
+Insert above the `tests` module in `src/viewer.rs`:
 
 ```rust
-//! The first real renderer: composite per-`CellType` tiles into one PNG-ready
-//! image per layer. Tiles are loaded from `assets/tiles/<stem>.png`; any missing
-//! (or off-size) tile falls back to `CellType::fallback_rgb`, so the map renders
-//! before the art exists. CPU-only; the live/GPU renderer is a later plan.
+//! Interactive map viewer *core*: a pan/zoom `Camera` and a pure framebuffer
+//! renderer that paints each cell as a solid palette colour
+//! (`CellType::fallback_rgb`). No windowing here — std-only and unit-tested. The
+//! window/input shell is `bin/mapview.rs` (minifb), which calls
+//! `render_to_buffer` each frame. This is the renderer the project keeps and
+//! later grows to draw the live simulation.
 
 use crate::space::{Coord, Layer, Space};
-use crate::terrain::{CellType, TerrainMap};
-use image::{Rgb, RgbImage};
-use std::collections::HashMap;
-use std::path::Path;
+use crate::terrain::TerrainMap;
 
-/// Edge length of one tile, in pixels. [A9]
-pub const TILE: u32 = 32;
+/// Base pixels-per-cell at zoom 1.0 (a 16×16 block per cell). [A9]
+pub const CELL_PX: f32 = 16.0;
 
-/// Load the tile for `t` (resizing to `TILE` if needed), or synthesize a solid
-/// fallback when the PNG is absent/unreadable.
-fn tile_image(t: CellType, tiles_dir: &Path) -> RgbImage {
-    let path = tiles_dir.join(format!("{}.png", t.tile_stem()));
-    if let Ok(img) = image::open(&path) {
-        let rgb = img.to_rgb8();
-        if rgb.width() == TILE && rgb.height() == TILE {
-            return rgb;
-        }
-        return image::imageops::resize(&rgb, TILE, TILE, image::imageops::FilterType::Nearest);
-    }
-    let [r, g, b] = t.fallback_rgb();
-    RgbImage::from_pixel(TILE, TILE, Rgb([r, g, b]))
+/// Colour (packed `0x00RRGGBB`) shown outside the map bounds.
+pub const BACKDROP: u32 = 0x0010_1014;
+
+/// A pan/zoom view. `(cx, cy)` is the map-cell coordinate (fractional) at the
+/// viewport's top-left corner; `zoom` is pixels-per-cell.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Camera {
+    pub cx: f32,
+    pub cy: f32,
+    pub zoom: f32,
 }
 
-/// Composite one layer of `map` into an `RgbImage` (`width·TILE × height·TILE`).
-/// Save it with `img.save("path.png")`.
-pub fn render_layer<S: Space>(
+impl Camera {
+    /// Start at the origin, one cell = `CELL_PX` pixels.
+    pub fn new() -> Self {
+        Camera { cx: 0.0, cy: 0.0, zoom: CELL_PX }
+    }
+
+    /// The map-cell coordinate (fractional) under a viewport pixel.
+    pub fn screen_to_cell(&self, px: f32, py: f32) -> (f32, f32) {
+        (self.cx + px / self.zoom, self.cy + py / self.zoom)
+    }
+
+    /// Pan by a screen-pixel delta (a mouse drag). Dragging right slides the view
+    /// left across the map.
+    pub fn pan_pixels(&mut self, dx: f32, dy: f32) {
+        self.cx -= dx / self.zoom;
+        self.cy -= dy / self.zoom;
+    }
+
+    /// Zoom by `factor` about a viewport pixel, keeping the map point under that
+    /// pixel fixed. `zoom` is clamped to a sane range.
+    pub fn zoom_at(&mut self, px: f32, py: f32, factor: f32) {
+        let (wx, wy) = self.screen_to_cell(px, py);
+        self.zoom = (self.zoom * factor).clamp(1.0, 256.0);
+        self.cx = wx - px / self.zoom;
+        self.cy = wy - py / self.zoom;
+    }
+}
+
+impl Default for Camera {
+    fn default() -> Self {
+        Camera::new()
+    }
+}
+
+/// Pack `[r, g, b]` into minifb's `0x00RRGGBB`.
+fn pack(rgb: [u8; 3]) -> u32 {
+    ((rgb[0] as u32) << 16) | ((rgb[1] as u32) << 8) | rgb[2] as u32
+}
+
+/// Fill `buf` (`width*height`, row-major) with the view of `map`'s `layer` under
+/// `cam`. Each cell is a solid `fallback_rgb`; out-of-bounds cells are `BACKDROP`.
+pub fn render_to_buffer<S: Space>(
     map: &TerrainMap,
     space: &S,
     layer: Layer,
-    tiles_dir: &Path,
-) -> RgbImage {
-    let (w, h) = (map.width(), map.height());
-    let mut canvas = RgbImage::new(w * TILE, h * TILE);
-    let mut cache: HashMap<CellType, RgbImage> = HashMap::new();
-    for y in 0..h {
-        for x in 0..w {
-            let t = map.get(space.index(Coord::new(x, y, layer)));
-            let tile = cache.entry(t).or_insert_with(|| tile_image(t, tiles_dir));
-            image::imageops::overlay(&mut canvas, tile, (x * TILE) as i64, (y * TILE) as i64);
+    cam: &Camera,
+    width: u32,
+    height: u32,
+    buf: &mut [u32],
+) {
+    let (mw, mh) = (map.width(), map.height());
+    for py in 0..height {
+        let wy = cam.cy + py as f32 / cam.zoom;
+        for px in 0..width {
+            let wx = cam.cx + px as f32 / cam.zoom;
+            let color = if wx >= 0.0 && wy >= 0.0 && (wx as u32) < mw && (wy as u32) < mh {
+                let c = Coord::new(wx as u32, wy as u32, layer);
+                pack(map.get(space.index(c)).fallback_rgb())
+            } else {
+                BACKDROP
+            };
+            buf[(py * width + px) as usize] = color;
         }
     }
-    canvas
 }
 ```
 
-- [ ] **Step 6: Run the tests**
+- [ ] **Step 5: Run the tests**
 
-Run: `cd ~/dev/alife && cargo test --lib render`
-Expected: `test result: ok. 1 passed`. (First build downloads `image`.)
+Run: `cd ~/dev/alife && cargo test --lib viewer`
+Expected: `test result: ok. 4 passed`.
 
-- [ ] **Step 7: Commit**
+- [ ] **Step 6: Commit**
 
 ```bash
-git -C ~/dev/alife add -A && git -C ~/dev/alife commit -m "feat: PNG tile renderer (tiles + solid-colour fallback)"
+git -C ~/dev/alife add -A && git -C ~/dev/alife commit -m "feat: viewer core — pan/zoom camera + solid-colour framebuffer"
 ```
 
 ---
@@ -1132,8 +1173,8 @@ git -C ~/dev/alife add -A && git -C ~/dev/alife commit -m "feat: PNG tile render
 - Modify: `.gitignore` (ignore `/out`)
 
 **Interfaces:**
-- Consumes: `sketch::parse_sketch`, `worldgen::{generate, ALCHAEA_SEED}`, `terrain::save_json`, `render::render_layer`, `space::{Grid2p5D, Layer}`.
-- Produces: no library API — the end-to-end demo and verification.
+- Consumes: `sketch::parse_sketch`, `worldgen::{generate, ALCHAEA_SEED}`, `terrain::save_json`.
+- Produces: no library API — the headless generate+save demo.
 
 - [ ] **Step 1: Ignore generated output**
 
@@ -1151,8 +1192,8 @@ Create `assets/sketch.json` (a 12×6 Tiled-style sketch: ocean border, land inte
 {
   "width": 12,
   "height": 6,
-  "tilewidth": 32,
-  "tileheight": 32,
+  "tilewidth": 16,
+  "tileheight": 16,
   "layers": [
     {
       "type": "tilelayer",
@@ -1177,12 +1218,10 @@ Create `assets/sketch.json` (a 12×6 Tiled-style sketch: ocean border, land inte
 Create `src/bin/mapgen.rs`:
 
 ```rust
-//! Generate the static world from a sketch and visualise it.
+//! Generate the static world from a sketch and save it as JSON.
 //! Usage: `cargo run --bin mapgen [sketch.json]` (default: assets/sketch.json).
-//! Writes out/alchaea.json + out/alchaea_{surface,underground}.png.
+//! Writes out/alchaea.json. View it with `cargo run --bin mapview`.
 
-use alife::render::render_layer;
-use alife::space::{Grid2p5D, Layer};
 use alife::terrain::save_json;
 use alife::worldgen::{generate, ALCHAEA_SEED};
 use std::path::Path;
@@ -1199,62 +1238,171 @@ fn main() {
     std::fs::create_dir_all("out").expect("make out/");
     save_json(&map, Path::new("out/alchaea.json")).expect("save json");
 
-    let space = Grid2p5D::new(w, h);
-    let tiles = Path::new("assets/tiles");
-    render_layer(&map, &space, Layer::Surface, tiles)
-        .save("out/alchaea_surface.png")
-        .expect("save surface png");
-    render_layer(&map, &space, Layer::Underground, tiles)
-        .save("out/alchaea_underground.png")
-        .expect("save underground png");
-
-    println!(
-        "generated {w}x{h} map (seed {:#x}) -> out/alchaea.json + out/alchaea_*.png",
-        map.seed()
-    );
+    println!("generated {w}x{h} map (seed {:#x}) -> out/alchaea.json", map.seed());
 }
 ```
 
-- [ ] **Step 4: Build, run, and verify the pipeline**
+- [ ] **Step 4: Build, run, and verify**
 
 Run: `cd ~/dev/alife && cargo run --bin mapgen`
-Expected: prints `generated 120x60 map (seed 0xa1c4ea) -> out/alchaea.json + out/alchaea_*.png`.
+Expected: prints `generated 120x60 map (seed 0xa1c4ea) -> out/alchaea.json`.
 
-Run: `ls -la ~/dev/alife/out`
-Expected: `alchaea.json`, `alchaea_surface.png` (3840×1920), `alchaea_underground.png` exist.
+Run: `cd ~/dev/alife && cargo run --bin mapgen && cp out/alchaea.json /tmp/a.json && cargo run --bin mapgen && cmp /tmp/a.json out/alchaea.json && echo DETERMINISTIC`
+Expected: `DETERMINISTIC` (identical JSON across runs).
 
-Run: `cd ~/dev/alife && cargo run --bin mapgen && cargo run --bin mapgen && cmp out/alchaea.json out/alchaea.json && echo DETERMINISTIC`
-Expected: identical JSON across runs (determinism). (Inspect `out/alchaea_surface.png` by eye: a central red Rasconne, teal rivers radiating out, a green core fading to grey Rock at the edges, ocean border — solid-colour fallback until your tiles land in `assets/tiles/`.)
+- [ ] **Step 5: Commit**
 
-- [ ] **Step 5: Full suite + clippy**
+```bash
+git -C ~/dev/alife add -A && git -C ~/dev/alife commit -m "feat: mapgen binary — sketch to terrain JSON, with a starter sketch"
+```
+
+---
+
+### Task 9: The interactive `mapview` window
+
+**Files:**
+- Create: `src/bin/mapview.rs`
+- Modify: `Cargo.toml` (add `minifb`)
+
+**Interfaces:**
+- Consumes: `terrain::{load_json, TerrainMap}`, `worldgen::{generate, ALCHAEA_SEED}`, `sketch::parse_sketch`, `viewer::{Camera, render_to_buffer}`, `space::{Grid2p5D, Layer}`.
+- Produces: no library API — the shipped interactive viewer.
+
+- [ ] **Step 1: Add the dependency**
+
+In `Cargo.toml`, under `[dependencies]`:
+
+```toml
+minifb = "0.27"
+```
+
+- [ ] **Step 2: Write the binary**
+
+Create `src/bin/mapview.rs`:
+
+```rust
+//! Interactive map viewer. Left-drag = pan, scroll = zoom, Tab = toggle layer,
+//! Esc = quit. Usage: `cargo run --bin mapview [map.json]`.
+//! Loads the map (default out/alchaea.json); if absent, generates one from
+//! assets/sketch.json with the canonical seed.
+
+use alife::space::{Grid2p5D, Layer};
+use alife::terrain::{load_json, TerrainMap};
+use alife::viewer::{render_to_buffer, Camera};
+use alife::worldgen::{generate, ALCHAEA_SEED};
+use minifb::{Key, MouseButton, MouseMode, ScaleMode, Window, WindowOptions};
+use std::path::Path;
+
+const INIT_W: usize = 960;
+const INIT_H: usize = 600;
+
+fn load_or_generate(path: &str) -> TerrainMap {
+    if Path::new(path).exists() {
+        if let Ok(map) = load_json(Path::new(path)) {
+            return map;
+        }
+    }
+    let json = std::fs::read_to_string("assets/sketch.json").expect("read assets/sketch.json");
+    let sketch = alife::sketch::parse_sketch(&json).expect("parse sketch");
+    generate(&sketch, 120, 60, ALCHAEA_SEED)
+}
+
+fn main() {
+    let path = std::env::args().nth(1).unwrap_or_else(|| "out/alchaea.json".into());
+    let map = load_or_generate(&path);
+    let space = Grid2p5D::new(map.width(), map.height());
+
+    let mut window = Window::new(
+        "alife — map viewer  (drag: pan, scroll: zoom, Tab: layer, Esc: quit)",
+        INIT_W,
+        INIT_H,
+        WindowOptions { resize: true, scale_mode: ScaleMode::Stretch, ..WindowOptions::default() },
+    )
+    .expect("open window");
+    window.set_target_fps(60);
+
+    let mut cam = Camera::new();
+    let mut layer = Layer::Surface;
+    let mut buf: Vec<u32> = vec![0; INIT_W * INIT_H];
+    let mut last_drag: Option<(f32, f32)> = None;
+    let mut tab_was_down = false;
+
+    while window.is_open() && !window.is_key_down(Key::Escape) {
+        let (vw, vh) = window.get_size();
+        if buf.len() != vw * vh {
+            buf = vec![0; vw * vh];
+        }
+
+        let mouse = window.get_mouse_pos(MouseMode::Pass);
+
+        // Left-drag to pan.
+        if window.get_mouse_down(MouseButton::Left) {
+            if let (Some((lx, ly)), Some((mx, my))) = (last_drag, mouse) {
+                cam.pan_pixels(mx - lx, my - ly);
+            }
+            last_drag = mouse;
+        } else {
+            last_drag = None;
+        }
+
+        // Scroll to zoom about the cursor.
+        if let Some((_, sy)) = window.get_scroll_wheel() {
+            if sy.abs() > 0.0 {
+                let (mx, my) = mouse.unwrap_or((vw as f32 / 2.0, vh as f32 / 2.0));
+                cam.zoom_at(mx, my, if sy > 0.0 { 1.1 } else { 1.0 / 1.1 });
+            }
+        }
+
+        // Tab toggles layer (edge-triggered).
+        let tab_down = window.is_key_down(Key::Tab);
+        if tab_down && !tab_was_down {
+            layer = match layer {
+                Layer::Surface => Layer::Underground,
+                Layer::Underground => Layer::Surface,
+            };
+        }
+        tab_was_down = tab_down;
+
+        render_to_buffer(&map, &space, layer, &cam, vw as u32, vh as u32, &mut buf);
+        window.update_with_buffer(&buf, vw, vh).expect("update window");
+    }
+}
+```
+
+- [ ] **Step 3: Build (headless-safe) and verify the whole suite**
+
+Run: `cd ~/dev/alife && cargo build --bin mapview`
+Expected: compiles (downloads `minifb` on first build). *Note: actually opening the window needs a display — run `cargo run --bin mapview` on your desktop machine, not in CI.*
+
+> If `minifb` fails to build in a headless sandbox (missing system X11/Wayland libs), make it optional: move it to `minifb = { version = "0.27", optional = true }`, add `[features] viewer = ["minifb"]`, put `#![cfg(feature = "viewer")]` at the top of `bin/mapview.rs`, and build with `--features viewer`. The library, tests, and `mapgen` stay unaffected.
 
 Run: `cd ~/dev/alife && cargo test`
-Expected: all green — plans 1–3 tests plus terrain (8), sketch (3), worldgen (7), render (1).
+Expected: all green — plans 1–3 tests plus terrain (8), sketch (3), worldgen (7), viewer (4). (`mapview` is a binary; tests don't open a window.)
 
 Run: `cd ~/dev/alife && cargo clippy --all-targets`
 Expected: no warnings.
 
-- [ ] **Step 6: Commit**
+- [ ] **Step 4: Commit**
 
 ```bash
-git -C ~/dev/alife add -A && git -C ~/dev/alife commit -m "feat: mapgen binary — sketch to JSON + PNG, with a starter sketch"
+git -C ~/dev/alife add -A && git -C ~/dev/alife commit -m "feat: interactive mapview window (pan/zoom/layer toggle)"
 ```
 
 ---
 
 ## What this delivers
 
-A fixed abiotic stage for the world: a `CellType` terrain map carrying valaar conductivity + passability, generated deterministically from a hand-drawn **Tiled** sketch by a lore-constrained pipeline (central Rasconne, continents in ocean, valaar rivers radiating outward, a Dusk periphery), persisted as JSON, and visualised with the project's first real tile renderer (PNG per layer, real tiles when present, solid-colour fallback until then). The canonical `ALCHAEA_SEED` rebuilds the same world every time.
+A fixed abiotic stage for the world: a `CellType` terrain map carrying valaar conductivity + passability, generated deterministically from a hand-drawn **Tiled** sketch by a lore-constrained pipeline (central Rasconne, continents in ocean, valaar rivers radiating outward, a Dusk periphery), persisted as JSON, and explored in an **interactive pan/zoom viewer** that paints each 16×16 cell in its palette colour — the renderer the project keeps and later grows to draw the live simulation. The canonical `ALCHAEA_SEED` rebuilds the same world every time.
 
-**How to use it with your assets:** drop your 32 px tiles into `assets/tiles/{ocean,land,river,rock,mountain,rasconne}.png` and re-run `cargo run --bin mapgen` — no code change. Hand me your real Tiled sketch and run `cargo run --bin mapgen path/to/your_sketch.json`.
+**How to use it:** `cargo run --bin mapgen path/to/your_sketch.json` to generate + save, then `cargo run --bin mapview` to explore (drag to pan, scroll to zoom, Tab to switch Surface/Underground). Hand me your real Tiled sketch and I'll wire it through.
 
-**Next plan — Plan 5: terrain-aware ecology.** Feed `CellType::conductivity()` into `valaar::diffuse_planar` (rivers conduct, oceans/mountains block) and `CellType::passable()` into `ecology::move_organisms` (oceans become real barriers → allopatric speciation). Then the dynamic world: Vraze land-bridges + earthquakes mutating the terrain, underground reservoirs/caves + the `digging` gene, and the valaar state-machine.
+**Next plan — Plan 5: terrain-aware ecology.** Feed `CellType::conductivity()` into `valaar::diffuse_planar` and `CellType::passable()` into `ecology::move_organisms` (oceans become real barriers → allopatric speciation). Also: load textured 16×16 PNG tiles into the viewer (replacing solid colours), and grow the viewer to draw the running simulation. Then the dynamic world (Vraze land-bridges + quakes, underground reservoirs + the `digging` gene, the valaar state-machine).
 
 ## Self-review notes
 
-- **Spec coverage:** terrain data model with conductivity + passability (Tasks 1–2, A1–A2); JSON persistence (Task 3, A8); Tiled sketch ingestion (Task 4, A7); lore-constrained deterministic generation — central Rasconne (Task 5, A3), upscaled continents/oceans (Task 5), valaar rivers (Task 6, A4), the Dusk gradient (Task 6, A5), underground placeholder (Task 5, A6); the first real renderer with tile + fallback paths (Task 7, A9); end-to-end binary + canonical seed (Task 8). Terrain→ecology integration explicitly deferred to plan 5 (per the decision that terrain-ecology is plan 5). Dynamic geography / underground / valaar-state deferred to plan 5+.
-- **Type consistency:** `CellType` variants and their `conductivity/passable/code/from_code/tile_stem/fallback_rgb` are defined once (Task 1) and used unchanged in `TerrainMap`, `sketch`, `worldgen`, and `render`. `TerrainMap` accessors (`width/height/layers/seed/len/get/set/cells`) defined in Task 2 are the only surface used later. `generate(&Sketch, u32, u32, u64) -> TerrainMap`, `parse_sketch(&str) -> Result<Sketch, String>`, `render_layer(&TerrainMap, &S, Layer, &Path) -> RgbImage`, and `save_json/load_json(&Path)` signatures match across their definitions and call sites (incl. `bin/mapgen.rs`). The GID→CellType convention (1..=6 = `CellType::ALL`) is stated in A7, in `sketch::region_from_gid`, and in the `assets/sketch.json` fixture.
-- **Determinism:** the only randomness is `Rng::new(seed ^ RIVER_SALT)` in `trace_rivers`; everything else is a pure function of the inputs. `serde_json` field order is stable. Task 5 and Task 8 assert byte-identical output across runs.
-- **Dependency discipline:** `serde`/`serde_json`/`image` are confined to `terrain`, `sketch`, and `render`; the engine modules stay std-only (Global Constraints). `image` built with `default-features = false, features = ["png"]` to stay lean.
-- **Placeholder scan:** every code step contains complete, compiling code; no TODO/TBD; all referenced types and functions are defined in this plan or in plans 1–3.
+- **Spec coverage:** terrain data model with conductivity + passability (Tasks 1–2, A1–A2); JSON persistence (Task 3, A8); Tiled sketch ingestion (Task 4, A7); deterministic lore generation — central Rasconne (Task 5, A3), upscaled continents/oceans (Task 5), valaar rivers (Task 6, A4), the Dusk gradient (Task 6, A5), underground placeholder (Task 5, A6); the interactive pan/zoom viewer core (Task 7, A9) + window (Task 9, A10); end-to-end generate/save binary + canonical seed (Task 8). Terrain→ecology integration, textured tiles, and the live-sim viewer are explicitly deferred to plan 5.
+- **Type consistency:** `CellType` and its `conductivity/passable/code/from_code/fallback_rgb` (Task 1) are used unchanged everywhere. `TerrainMap` accessors (Task 2) are the only surface used later. `generate(&Sketch, u32, u32, u64) -> TerrainMap`, `parse_sketch(&str) -> Result<Sketch, String>`, `Camera`/`render_to_buffer`, and `save_json/load_json` signatures match across definitions and call sites (`bin/mapgen.rs`, `bin/mapview.rs`). The GID→CellType convention (1..=6 = `CellType::ALL`) is stated in A7, in `sketch::region_from_gid`, and in `assets/sketch.json`.
+- **Determinism:** the only randomness is `Rng::new(seed ^ RIVER_SALT)` in `trace_rivers`. Task 5 and Task 8 assert identical output across runs. The viewer's render is a pure function of `(map, camera, layer, size)`.
+- **Headless CI:** every test is pure (no window). `viewer.rs` is std-only and fully tested; `minifb` lives only in `bin/mapview.rs`, verified by building (with a documented optional-feature fallback if a sandbox can't build it).
+- **Placeholder scan:** every code step contains complete, compiling code; no TODO/TBD; all referenced types and functions are defined here or in plans 1–3.
 ```
