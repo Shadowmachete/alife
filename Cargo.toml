@@ -5,3 +5,4 @@ edition = "2021"
 license = "Unlicense"
 
 [dependencies]
+serde = { version = "1", features = ["derive"] }
