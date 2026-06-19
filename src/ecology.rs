@@ -168,6 +168,27 @@ pub fn reproduce(pop: &mut Population, eco: &EcoParams, rng: &mut Rng) {
     }
 }
 
+/// Drain energy from organisms whose cell is hotter or drier than their genes
+/// can stand. Heat above `heat_tolerance` and water below the organism's need
+/// (`1 - drought_tolerance`) each cost energy. Never adds energy; deaths fall
+/// out of the normal cull.
+pub fn environmental_stress<S: Space>(
+    space: &S,
+    heat: &Field,
+    water: &Field,
+    pop: &mut Population,
+    eco: &EcoParams,
+) {
+    for o in pop.organisms_mut() {
+        let i = space.index(o.pos);
+        let heat_excess = (heat.get(i) - o.genome.heat_tolerance).max(0.0);
+        let water_need = 1.0 - o.genome.drought_tolerance;
+        let water_deficit = (water_need - water.get(i)).max(0.0);
+        let penalty = eco.heat_stress * heat_excess + eco.drought_stress * water_deficit;
+        o.energy -= penalty;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -392,5 +413,56 @@ mod tests {
         let mut rng = Rng::new(3);
         reproduce(&mut pop, &eco, &mut rng);
         assert_eq!(pop.len(), 1);
+    }
+
+    // genome with explicit tolerances: [size, eff, speed, diet, repro, lifespan, heat_tol, drought_tol]
+    fn tol_genome(heat_tol: f32, drought_tol: f32) -> Genome {
+        Genome::from_array([0.5, 1.0, 0.0, 0.0, 0.9, 0.5, heat_tol, drought_tol])
+    }
+
+    #[test]
+    fn heat_intolerant_loses_energy_in_a_hot_cell() {
+        let space = Grid2p5D::new(4, 4);
+        let eco = EcoParams::default();
+        let c = Coord::new(1, 1, Layer::Surface);
+        let mut heat = crate::field::Field::zeros(space.len());
+        let water = crate::field::Field::zeros(space.len());
+        heat.set(space.index(c), 1.0); // scorching
+        let mut pop = Population::new();
+        pop.spawn(TraitOrganism::new(tol_genome(0.1, 1.0), c, 5.0)); // can't take heat, no drought issue
+
+        environmental_stress(&space, &heat, &water, &mut pop, &eco);
+        assert!(pop.organisms()[0].energy < 5.0, "heat-intolerant should suffer");
+    }
+
+    #[test]
+    fn heat_tolerant_is_unscathed() {
+        let space = Grid2p5D::new(4, 4);
+        let eco = EcoParams::default();
+        let c = Coord::new(1, 1, Layer::Surface);
+        let mut heat = crate::field::Field::zeros(space.len());
+        let mut water = crate::field::Field::zeros(space.len());
+        heat.set(space.index(c), 1.0);
+        water.set(space.index(c), 1.0); // wet, so no drought stress either
+        let mut pop = Population::new();
+        pop.spawn(TraitOrganism::new(tol_genome(1.0, 1.0), c, 5.0)); // immune
+
+        environmental_stress(&space, &heat, &water, &mut pop, &eco);
+        assert_eq!(pop.organisms()[0].energy, 5.0, "tolerant should be unscathed");
+    }
+
+    #[test]
+    fn drought_drains_the_intolerant() {
+        let space = Grid2p5D::new(4, 4);
+        let eco = EcoParams::default();
+        let c = Coord::new(1, 1, Layer::Surface);
+        let heat = crate::field::Field::zeros(space.len()); // cool
+        let water = crate::field::Field::zeros(space.len()); // bone dry (0.0)
+        let mut pop = Population::new();
+        // drought_tolerance 0.0 => needs water 1.0; finds 0.0 => big deficit
+        pop.spawn(TraitOrganism::new(tol_genome(1.0, 0.0), c, 5.0));
+
+        environmental_stress(&space, &heat, &water, &mut pop, &eco);
+        assert!(pop.organisms()[0].energy < 5.0, "drought-intolerant should suffer");
     }
 }

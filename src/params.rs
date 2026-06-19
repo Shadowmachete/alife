@@ -29,6 +29,10 @@ pub struct EcoParams {
     pub max_lifespan: u32,
     /// Fraction of prey energy a predator captures.
     pub predation_efficiency: f32,
+    /// Energy drained per unit of heat above an organism's heat_tolerance.
+    pub heat_stress: f32,
+    /// Energy drained per unit of water deficit below its need.
+    pub drought_stress: f32,
     /// Energy a seeded/initial organism starts with.
     pub initial_energy: f32,
 }
@@ -48,6 +52,8 @@ impl Default for EcoParams {
             min_lifespan: 20,
             max_lifespan: 200,
             predation_efficiency: 0.6,
+            heat_stress: 0.1,
+            drought_stress: 0.1,
             initial_energy: 2.0,
         }
     }
