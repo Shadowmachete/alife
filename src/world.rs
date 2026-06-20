@@ -99,6 +99,14 @@ impl<S: Space> World<S> {
     pub fn swimmable(&self) -> Option<&[bool]> {
         self.swimmable.as_deref()
     }
+
+    /// Flip a single cell's passability (used by dynamic terrain such as land
+    /// bridges). No-op if no passability mask is installed.
+    pub fn set_cell_passable(&mut self, index: usize, passable: bool) {
+        if let Some(mask) = self.passability.as_mut() {
+            mask[index] = passable;
+        }
+    }
 }
 
 impl<S: Space> World<S> {
@@ -163,5 +171,24 @@ mod tests {
         world.set_swimmable(mask);
         assert_eq!(world.swimmable().unwrap().len(), world.space.len());
         assert!(world.swimmable().unwrap()[0]);
+    }
+
+    #[test]
+    fn set_cell_passable_flips_one_cell() {
+        let space = Grid2p5D::new(2, 2);
+        let mut world = World::new(space, Params::default());
+        world.set_passability(vec![false; world.space.len()]);
+        world.set_cell_passable(2, true);
+        assert!(world.passability().unwrap()[2]);
+        world.set_cell_passable(2, false);
+        assert!(!world.passability().unwrap()[2]);
+    }
+
+    #[test]
+    fn set_cell_passable_is_noop_without_a_mask() {
+        let space = Grid2p5D::new(2, 2);
+        let mut world = World::new(space, Params::default());
+        world.set_cell_passable(0, true); // must not panic
+        assert!(world.passability().is_none());
     }
 }
