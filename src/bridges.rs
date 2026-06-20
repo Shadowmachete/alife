@@ -4,6 +4,7 @@
 //! `Bridges` controller (Task 2) schedules which open, when, and for how long.
 
 use crate::rng::Rng;
+use crate::season::{Calendar, Season, CRAWS_PER_ARH};
 use crate::terrain::CellType;
 
 /// Tunable dials for bridge generation and scheduling.
@@ -149,6 +150,85 @@ pub fn find_bridge_sites(
     sites
 }
 
+/// Cells whose passability changed this tick.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct BridgeUpdate {
+    pub opened: Vec<usize>,
+    pub closed: Vec<usize>,
+}
+
+/// Runtime controller: owns the sites, their open/closed state, the current
+/// Vraze's per-site schedule, and a **dedicated RNG** so the main ecology RNG
+/// stream is untouched (old seeds reproduce identically).
+pub struct Bridges {
+    sites: Vec<BridgeSite>,
+    cfg: BridgeConfig,
+    open: Vec<bool>,
+    /// `(open_craw, close_craw)` within the year for the scheduled Vraze, per
+    /// site; `None` = this site does not open this Vraze.
+    window: Vec<Option<(u32, u32)>>,
+    scheduled_year: Option<u32>,
+    rng: Rng,
+}
+
+impl Bridges {
+    pub fn new(sites: Vec<BridgeSite>, cfg: BridgeConfig, seed: u64) -> Self {
+        let n = sites.len();
+        Bridges { sites, cfg, open: vec![false; n], window: vec![None; n], scheduled_year: None, rng: Rng::new(seed) }
+    }
+
+    pub fn site_count(&self) -> usize {
+        self.sites.len()
+    }
+
+    /// Roll a fresh schedule for the current Vraze: each site opens with prob
+    /// `open_fraction`, at a random offset into the Vraze arh, for a random
+    /// duration (clamped inside the arh).
+    fn schedule(&mut self) {
+        let cfg = self.cfg;
+        let vraze_start = Season::Vraze.index() as u32 * CRAWS_PER_ARH;
+        let vraze_end = vraze_start + CRAWS_PER_ARH;
+        for i in 0..self.window.len() {
+            if self.rng.next_unit() < cfg.open_fraction {
+                let span = (cfg.max_duration.saturating_sub(cfg.min_duration) + 1) as f32;
+                let dur = (cfg.min_duration + (self.rng.next_unit() * span) as u32).clamp(1, CRAWS_PER_ARH);
+                let latest_start = CRAWS_PER_ARH.saturating_sub(dur);
+                let off = ((self.rng.next_unit() * (latest_start + 1) as f32) as u32).min(latest_start);
+                let open_craw = vraze_start + off;
+                let close_craw = (open_craw + dur).min(vraze_end);
+                self.window[i] = Some((open_craw, close_craw));
+            } else {
+                self.window[i] = None;
+            }
+        }
+    }
+
+    /// Advance one tick. Rolls a new schedule at the first Vraze tick of each
+    /// year; flips each site open/closed by the current craw; returns the cells
+    /// whose passability changed this tick.
+    pub fn update(&mut self, calendar: &Calendar) -> BridgeUpdate {
+        let mut upd = BridgeUpdate::default();
+        let in_vraze = calendar.season() == Season::Vraze;
+        if in_vraze && self.scheduled_year != Some(calendar.year()) {
+            self.scheduled_year = Some(calendar.year());
+            self.schedule();
+        }
+        let craw = calendar.craw();
+        for i in 0..self.sites.len() {
+            let want_open = in_vraze
+                && matches!(self.window[i], Some((o, c)) if craw >= o && craw < c);
+            if want_open && !self.open[i] {
+                self.open[i] = true;
+                upd.opened.extend_from_slice(&self.sites[i].cells);
+            } else if !want_open && self.open[i] {
+                self.open[i] = false;
+                upd.closed.extend_from_slice(&self.sites[i].cells);
+            }
+        }
+        upd
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -218,5 +298,62 @@ mod tests {
         let a = find_bridge_sites(&m, sw, sh, &labels, &mut Rng::new(9), &BridgeConfig::default());
         let b = find_bridge_sites(&m, sw, sh, &labels, &mut Rng::new(9), &BridgeConfig::default());
         assert_eq!(a, b);
+    }
+
+    fn cal_at(target_craw: u32) -> Calendar {
+        let mut c = Calendar::new();
+        while c.craw() < target_craw {
+            c.advance();
+        }
+        c
+    }
+
+    #[test]
+    fn closed_outside_vraze() {
+        let cfg = BridgeConfig { open_fraction: 1.0, ..BridgeConfig::default() };
+        let mut b = Bridges::new(vec![BridgeSite { cells: vec![5, 6] }], cfg, 7);
+        let upd = b.update(&cal_at(150)); // Goscon
+        assert!(upd.opened.is_empty() && upd.closed.is_empty());
+    }
+
+    #[test]
+    fn opens_then_closes_within_vraze() {
+        let cfg = BridgeConfig { open_fraction: 1.0, min_duration: 10, max_duration: 10, ..BridgeConfig::default() };
+        let mut b = Bridges::new(vec![BridgeSite { cells: vec![5, 6] }], cfg, 7);
+        let mut opened_at = None;
+        let mut closed_at = None;
+        let mut c = cal_at(3 * CRAWS_PER_ARH); // start of Vraze
+        for _ in 0..CRAWS_PER_ARH {
+            let upd = b.update(&c);
+            if !upd.opened.is_empty() {
+                assert_eq!(upd.opened, vec![5, 6]);
+                opened_at = Some(c.craw());
+            }
+            if !upd.closed.is_empty() {
+                assert_eq!(upd.closed, vec![5, 6]);
+                closed_at = Some(c.craw());
+            }
+            c.advance();
+        }
+        let (o, cl) = (opened_at.expect("opened in Vraze"), closed_at.expect("closed in Vraze"));
+        assert!(cl > o, "closes after it opens");
+    }
+
+    #[test]
+    fn schedule_is_seed_deterministic() {
+        let cfg = BridgeConfig { open_fraction: 0.5, ..BridgeConfig::default() };
+        let sites = vec![BridgeSite { cells: vec![1] }, BridgeSite { cells: vec![2] }, BridgeSite { cells: vec![3] }];
+        let run = |seed| {
+            let mut b = Bridges::new(sites.clone(), cfg, seed);
+            let mut log = Vec::new();
+            let mut c = cal_at(3 * CRAWS_PER_ARH);
+            for _ in 0..CRAWS_PER_ARH {
+                let u = b.update(&c);
+                log.push((u.opened, u.closed));
+                c.advance();
+            }
+            log
+        };
+        assert_eq!(run(123), run(123));
     }
 }
