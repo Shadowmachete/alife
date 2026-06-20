@@ -201,7 +201,11 @@ pub fn reproduce(pop: &mut Population, eco: &EcoParams, rng: &mut Rng) {
             let child_energy = o.energy * eco.repro_cost_fraction;
             o.energy -= child_energy;
             let child_genome = o.genome.mutate(rng, eco.mutation_rate);
-            children.push(TraitOrganism::new(child_genome, o.pos, child_energy));
+            let mut child = TraitOrganism::new(child_genome, o.pos, child_energy);
+            // Lamarckian: reset disuse if the parent actually swam this life,
+            // otherwise carry it forward incremented.
+            child.swim_disuse = if o.swam { 0 } else { o.swim_disuse.saturating_add(1) };
+            children.push(child);
         }
     }
     for c in children {
@@ -494,6 +498,40 @@ mod tests {
         valaar_cost(&space, Some(&swimmable), &mut pop, &eco);
         assert_eq!(pop.organisms()[0].energy, 5.0);
         assert!(!pop.organisms()[0].swam);
+    }
+
+    #[test]
+    fn swimmer_parent_resets_child_disuse() {
+        let eco = EcoParams::default();
+        let c = Coord::new(1, 1, Layer::Surface);
+        let mut pop = Population::new();
+        // repro_threshold 0 => any energy reproduces; swim gene high.
+        let g = Genome::from_array([0.5, 1.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 0.9]);
+        let mut parent = TraitOrganism::new(g, c, 5.0);
+        parent.swam = true;
+        parent.swim_disuse = 1;
+        pop.spawn(parent);
+        let mut rng = Rng::new(3);
+        reproduce(&mut pop, &eco, &mut rng);
+        assert_eq!(pop.organisms()[1].swim_disuse, 0, "a swimming parent resets the counter");
+        assert!(!pop.organisms()[1].swam, "the child has not swum yet");
+    }
+
+    #[test]
+    fn idle_parent_increments_child_disuse_to_loss() {
+        let eco = EcoParams::default(); // limit Some(2)
+        let c = Coord::new(1, 1, Layer::Surface);
+        let mut pop = Population::new();
+        let g = Genome::from_array([0.5, 1.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 0.9]);
+        let mut parent = TraitOrganism::new(g, c, 5.0);
+        parent.swam = false;
+        parent.swim_disuse = 1;
+        pop.spawn(parent);
+        let mut rng = Rng::new(3);
+        reproduce(&mut pop, &eco, &mut rng);
+        let child = &pop.organisms()[1];
+        assert_eq!(child.swim_disuse, 2);
+        assert!(!child.can_swim(&eco), "two idle generations lose the ability");
     }
 
     // [size, eff, speed, diet, repro_threshold, lifespan, heat_tol, drought_tol]
