@@ -54,9 +54,10 @@ developmental morphology) can drop in later as *new clades*, not rewrites.
 - **Determinism** — identical seed + params ⇒ identical run. One `Rng`, processed
   in a fixed order; no wall-clock or thread nondeterminism.
 - **`std`-only core** — the simulation engine uses no external crates. The map
-  viewer and map I/O (plan 4) are the only places that pull in dependencies
-  (`minifb` for the window, `serde`/`serde_json` for map files), kept out of the
-  hot path.
+  viewer and map I/O are the only places that pull in dependencies (`eframe`/`egui`
+  for the interactive window, `serde`/`serde_json` for map files), kept out of the
+  hot path. The viewer is written as an `eframe::App` so it can later build to
+  WASM and embed on the web.
 - **Spatial access stays behind the `Space` trait** — the world is 2D today
   (`Grid2p5D`); a future `Grid3D` should require no changes elsewhere.
 
@@ -90,9 +91,12 @@ python3 tools/sketch_to_map.py [sketch.png] [out.json]
 python3 tools/tmx_autotile.py    # assets/alife_map.tmx -> assets/alife_map_blended.tmx
 python3 tools/png_to_rgba.py     # bake assets/sheet.png -> assets/sheet.rgba (atlas)
 
-# Open the interactive map viewer: drag to pan, scroll to zoom, Esc quits.
-#   .tmx arg  -> textured, drawn from the atlas (default alife_map_blended.tmx)
-#   .json arg -> TerrainMap in solid CellType colours (Tab toggles layer)
+# Open the interactive map viewer (egui): drag to pan, scroll to zoom.
+#   .tmx arg  -> textured live sim (default alife_map_blended.tmx). Organisms are
+#                circles sized by body, coloured by diet (green autotroph -> red
+#                predator), and stay off ocean/valaar. Right panel: population,
+#                diet split, mean size, per-continent counts, and Pause/Reseed.
+#   .json arg -> TerrainMap in solid CellType colours (layer toggle in the panel)
 cargo run --bin mapview [map.tmx | map.json]
 ```
 
