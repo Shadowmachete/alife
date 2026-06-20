@@ -13,20 +13,20 @@ use serde::{Deserialize, Serialize};
 pub enum CellType {
     Ocean,
     Land,
-    River,
+    /// The world's energy substance — both flowing rivers and the standing
+    /// Rasconne reservoir. (Formerly the separate `River` and `Rasconne` types.)
+    Valaar,
     Rock,
     Mountain,
-    Rasconne,
 }
 
 impl CellType {
-    pub const ALL: [CellType; 6] = [
+    pub const ALL: [CellType; 5] = [
         CellType::Ocean,
         CellType::Land,
-        CellType::River,
+        CellType::Valaar,
         CellType::Rock,
         CellType::Mountain,
-        CellType::Rasconne,
     ];
 
     /// How freely valaar diffuses through this cell (0 = blocks). A multiplier on
@@ -38,8 +38,7 @@ impl CellType {
             CellType::Mountain => 0.0,
             CellType::Rock => 0.3,
             CellType::Land => 1.0,
-            CellType::River => 1.5,
-            CellType::Rasconne => 2.0,
+            CellType::Valaar => 2.0,
         }
     }
 
@@ -53,10 +52,9 @@ impl CellType {
         match self {
             CellType::Ocean => 'O',
             CellType::Land => '.',
-            CellType::River => '~',
+            CellType::Valaar => 'V',
             CellType::Rock => ':',
             CellType::Mountain => '^',
-            CellType::Rasconne => 'R',
         }
     }
 
@@ -64,10 +62,9 @@ impl CellType {
         match c {
             'O' => Some(CellType::Ocean),
             '.' => Some(CellType::Land),
-            '~' => Some(CellType::River),
+            'V' => Some(CellType::Valaar),
             ':' => Some(CellType::Rock),
             '^' => Some(CellType::Mountain),
-            'R' => Some(CellType::Rasconne),
             _ => None,
         }
     }
@@ -78,10 +75,9 @@ impl CellType {
         match self {
             CellType::Ocean => [20, 28, 64],
             CellType::Land => [96, 120, 72],
-            CellType::River => [40, 180, 170],
+            CellType::Valaar => [220, 80, 60],
             CellType::Rock => [96, 92, 110],
             CellType::Mountain => [120, 120, 130],
-            CellType::Rasconne => [220, 80, 60],
         }
     }
 }
@@ -174,11 +170,10 @@ mod tests {
     }
 
     #[test]
-    fn rivers_and_the_core_conduct_better_than_land() {
-        assert!(CellType::River.conductivity() > CellType::Land.conductivity());
-        assert!(CellType::Rasconne.conductivity() >= CellType::River.conductivity());
+    fn valaar_conducts_better_than_land() {
+        assert!(CellType::Valaar.conductivity() > CellType::Land.conductivity());
         assert!(CellType::Land.passable());
-        assert!(CellType::Rasconne.passable());
+        assert!(CellType::Valaar.passable());
     }
 
     #[test]
@@ -210,8 +205,8 @@ mod tests {
         let space = Grid2p5D::new(4, 3);
         let mut map = TerrainMap::filled(space.len(), 4, 3, CellType::Ocean, 0);
         let c = Coord::new(2, 1, Layer::Surface);
-        map.set(space.index(c), CellType::Rasconne);
-        assert_eq!(map.get(space.index(c)), CellType::Rasconne);
+        map.set(space.index(c), CellType::Valaar);
+        assert_eq!(map.get(space.index(c)), CellType::Valaar);
         assert_eq!(map.get(space.index(Coord::new(0, 0, Layer::Underground))), CellType::Ocean);
     }
 
@@ -219,7 +214,7 @@ mod tests {
     fn json_round_trips_through_a_file() {
         let space = Grid2p5D::new(5, 4);
         let mut map = TerrainMap::filled(space.len(), 5, 4, CellType::Land, 0xABCD);
-        map.set(space.index(Coord::new(2, 2, Layer::Surface)), CellType::Rasconne);
+        map.set(space.index(Coord::new(2, 2, Layer::Surface)), CellType::Valaar);
         map.set(space.index(Coord::new(0, 0, Layer::Surface)), CellType::Ocean);
 
         let path = std::env::temp_dir().join("alife_terrain_roundtrip.json");

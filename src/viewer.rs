@@ -102,7 +102,7 @@ mod tests {
     fn two_by_two() -> (Grid2p5D, TerrainMap) {
         let space = Grid2p5D::new(2, 2);
         let mut map = TerrainMap::filled(space.len(), 2, 2, CellType::Ocean, 0);
-        map.set(space.index(Coord::new(1, 0, Layer::Surface)), CellType::Rasconne);
+        map.set(space.index(Coord::new(1, 0, Layer::Surface)), CellType::Valaar);
         (space, map)
     }
 
@@ -115,7 +115,7 @@ mod tests {
         render_to_buffer(&map, &space, Layer::Surface, &cam, w, h, &mut buf);
         let at = |x: u32, y: u32| buf[(y * w + x) as usize];
         assert_eq!(at(8, 8), pack(CellType::Ocean.fallback_rgb())); // cell (0,0)
-        assert_eq!(at(24, 8), pack(CellType::Rasconne.fallback_rgb())); // cell (1,0)
+        assert_eq!(at(24, 8), pack(CellType::Valaar.fallback_rgb())); // cell (1,0)
     }
 
     #[test]

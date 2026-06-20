@@ -81,14 +81,19 @@ cargo run --example heatmap
 Static geography (plan 4):
 
 ```sh
-# Generate the static world from a Tiled sketch and save it (out/alchaea.json)
-cargo run --bin mapgen [sketch.json]
+# Rasterize a hand-drawn map sketch (PNG) into a terrain map (out/alchaea.json).
+# Colours: blue=ocean, green=land, red=valaar reservoir, black lines=valaar rivers.
+python3 tools/sketch_to_map.py [sketch.png] [out.json]
 
-# Open the interactive map viewer: drag to pan, scroll to zoom,
-# Tab toggles Surface/Underground, Esc quits. (Generates from the starter
-# sketch if no map exists yet.) Cells are solid palette colours for now;
-# textured 16×16 tiles drop in later.
-cargo run --bin mapview [map.json]
+# Author a map in Tiled with the connecting tileset, then upscale + fill in the
+# blend tiles (flat regions -> organic coast/riverbanks):
+python3 tools/tmx_autotile.py    # assets/alife_map.tmx -> assets/alife_map_blended.tmx
+python3 tools/png_to_rgba.py     # bake assets/sheet.png -> assets/sheet.rgba (atlas)
+
+# Open the interactive map viewer: drag to pan, scroll to zoom, Esc quits.
+#   .tmx arg  -> textured, drawn from the atlas (default alife_map_blended.tmx)
+#   .json arg -> TerrainMap in solid CellType colours (Tab toggles layer)
+cargo run --bin mapview [map.tmx | map.json]
 ```
 
 ## Layout
@@ -109,10 +114,13 @@ src/
   climate.rs      season → heat/water targets + field relaxation
   sim.rs          Sim — weaves world + climate + ecology into one tick
   terrain.rs      (plan 4) CellType + TerrainMap + JSON I/O
-  sketch.rs       (plan 4) parse a Tiled sketch
-  worldgen.rs     (plan 4) sketch → terrain map (deterministic, lore-constrained)
-  viewer.rs       (plan 4) pan/zoom camera + framebuffer renderer
-  bin/            life, sim, mapgen, mapview
+  viewer.rs       (plan 4) pan/zoom camera + solid-colour renderer
+  tilemap.rs      (plan 4) Tiled .tmx + atlas loader + textured renderer
+  bin/            life, sim, mapview
+tools/
+  sketch_to_map.py    rasterize a hand-drawn PNG sketch → terrain map JSON
+  tmx_autotile.py     upscale a flat Tiled map + fill in connecting tiles
+  png_to_rgba.py      bake a PNG atlas → raw RGBA for the viewer
 docs/
   plans/          implementation plans (one per plan)
   tile-design-guide.md

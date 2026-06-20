@@ -12,6 +12,6 @@ pub mod sim;
 pub mod season;
 pub mod climate;
 pub mod terrain;
-pub mod sketch;
-pub mod worldgen;
 pub mod viewer;
+pub mod tilemap;
+pub mod mapsim;
