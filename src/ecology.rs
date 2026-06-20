@@ -116,6 +116,28 @@ pub fn move_organisms<S: Space>(
     }
 }
 
+/// Drain `eco.valaar_drain` from every organism standing on a swimmable
+/// (Valaar) cell, and mark it as having swum this life (`swam = true`). Only
+/// swimmers can legally be on such cells, so this is the running cost of
+/// swimming. `swimmable`: `None` = no Valaar anywhere (no-op).
+pub fn valaar_cost<S: Space>(
+    space: &S,
+    swimmable: Option<&[bool]>,
+    pop: &mut Population,
+    eco: &EcoParams,
+) {
+    let mask = match swimmable {
+        Some(m) => m,
+        None => return,
+    };
+    for o in pop.organisms_mut() {
+        if mask[space.index(o.pos)] {
+            o.swam = true;
+            o.energy -= eco.valaar_drain;
+        }
+    }
+}
+
 /// Resolve at most one predation per cell: the strongest predator
 /// (`size·diet`, ties→lowest index) eats the smallest other occupant, but only
 /// if it is a real predator (`diet > 0.5`) and strictly bigger than its victim.
@@ -446,6 +468,32 @@ mod tests {
         let mut rng = Rng::new(1);
         move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&passable), Some(&swimmable));
         assert_eq!(pop.organisms()[0].pos, start, "a non-swimmer cannot enter valaar");
+    }
+
+    #[test]
+    fn valaar_cell_drains_and_marks_swam() {
+        let space = Grid2p5D::new(2, 1);
+        let eco = EcoParams::default();
+        let mut swimmable = vec![false; space.len()];
+        swimmable[space.index(Coord::new(1, 0, Layer::Surface))] = true;
+        let mut pop = Population::new();
+        pop.spawn(TraitOrganism::new(swimmer(0.9), Coord::new(1, 0, Layer::Surface), 5.0));
+        valaar_cost(&space, Some(&swimmable), &mut pop, &eco);
+        assert!((pop.organisms()[0].energy - (5.0 - eco.valaar_drain)).abs() < 1e-6);
+        assert!(pop.organisms()[0].swam, "standing on valaar counts as swimming");
+    }
+
+    #[test]
+    fn dry_land_is_free_and_not_swimming() {
+        let space = Grid2p5D::new(2, 1);
+        let eco = EcoParams::default();
+        let mut swimmable = vec![false; space.len()];
+        swimmable[space.index(Coord::new(1, 0, Layer::Surface))] = true;
+        let mut pop = Population::new();
+        pop.spawn(TraitOrganism::new(swimmer(0.9), Coord::new(0, 0, Layer::Surface), 5.0)); // on land
+        valaar_cost(&space, Some(&swimmable), &mut pop, &eco);
+        assert_eq!(pop.organisms()[0].energy, 5.0);
+        assert!(!pop.organisms()[0].swam);
     }
 
     // [size, eff, speed, diet, repro_threshold, lifespan, heat_tol, drought_tol]
