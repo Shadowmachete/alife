@@ -10,10 +10,13 @@ use alife::mapsim::{
 use alife::params::EcoParams;
 use alife::sim::Sim;
 use alife::space::{Grid2p5D, Layer, Space};
-use alife::terrain::{load_json, CellType, TerrainMap};
+use alife::terrain::{CellType, TerrainMap};
+#[cfg(not(target_arch = "wasm32"))]
+use alife::terrain::load_json;
 use alife::tilemap::{material_grid, parse_tmx, render_tiles_to_buffer, Atlas, TileMap};
 use alife::viewer::{render_to_buffer, Camera};
 use eframe::egui;
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 const SIM_SCALE: u32 = 3; // sim grid is the display grid downscaled by this
@@ -39,6 +42,8 @@ impl TileSim {
     }
 }
 
+// On wasm only `Tiles` is constructed (the .json `TerrainMap` scene is native).
+#[cfg_attr(target_arch = "wasm32", allow(dead_code))]
 enum Scene {
     Tiles(Box<TileSim>),
     Terrain { map: TerrainMap, space: Grid2p5D, layer: Layer },
@@ -81,6 +86,7 @@ fn build_tile_scene(xml: &str, atlas_bytes: &[u8]) -> Scene {
     Scene::Tiles(Box::new(t))
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn load_scene(path: &str) -> Scene {
     if path.ends_with(".tmx") {
         let xml = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read {path}: {e}"));
@@ -99,6 +105,16 @@ fn load_scene(path: &str) -> Scene {
         let space = Grid2p5D::new(map.width(), map.height());
         Scene::Terrain { map, space, layer: Layer::Surface }
     }
+}
+
+/// Web build: assets are baked into the binary at compile time (no filesystem in
+/// the browser). The path argument is ignored — the demo always shows the
+/// default textured map.
+#[cfg(target_arch = "wasm32")]
+fn load_scene(_path: &str) -> Scene {
+    let xml = include_str!("../../assets/alife_map_blended.tmx");
+    let atlas_bytes = include_bytes!("../../assets/sheet.rgba");
+    build_tile_scene(xml, atlas_bytes)
 }
 
 /// Fit the whole map in a `vw×vh` viewport and centre it.
