@@ -44,7 +44,7 @@ impl CellType {
 
     /// Whether an organism may move into this cell (plan 5 consumes this).
     pub fn passable(self) -> bool {
-        !matches!(self, CellType::Ocean | CellType::Mountain)
+        !matches!(self, CellType::Ocean | CellType::Mountain | CellType::Valaar)
     }
 
     /// One-char code for compact text / debugging.
@@ -162,9 +162,10 @@ mod tests {
     }
 
     #[test]
-    fn oceans_and_mountains_block_movement_and_valaar() {
+    fn ocean_mountain_and_valaar_block_movement() {
         assert!(!CellType::Ocean.passable());
         assert!(!CellType::Mountain.passable());
+        assert!(!CellType::Valaar.passable());
         assert_eq!(CellType::Ocean.conductivity(), 0.0);
         assert_eq!(CellType::Mountain.conductivity(), 0.0);
     }
@@ -173,7 +174,7 @@ mod tests {
     fn valaar_conducts_better_than_land() {
         assert!(CellType::Valaar.conductivity() > CellType::Land.conductivity());
         assert!(CellType::Land.passable());
-        assert!(CellType::Valaar.passable());
+        assert!(!CellType::Valaar.passable()); // rivers/reservoir: life lives on the banks
     }
 
     #[test]

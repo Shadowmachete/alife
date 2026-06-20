@@ -34,6 +34,9 @@ pub struct World<S: Space> {
     pub params: Params,
     sources: Vec<Coord>,
     access_points: Vec<(u32, u32)>,
+    /// Per-cell passability (sized to `space.len()`); `None` = everywhere
+    /// passable. Set from the terrain map; consumed by `ecology::move_organisms`.
+    passability: Option<Vec<bool>>,
 }
 
 impl<S: Space> World<S> {
@@ -45,6 +48,7 @@ impl<S: Space> World<S> {
             params,
             sources: Vec::new(),
             access_points: Vec::new(),
+            passability: None,
         }
     }
 
@@ -65,6 +69,18 @@ impl<S: Space> World<S> {
 
     pub fn access_points(&self) -> &[(u32, u32)] {
         &self.access_points
+    }
+
+    /// Install a per-cell passability mask (`true` = passable). Length must
+    /// equal `space.len()` (all layers, `Space::index` order).
+    pub fn set_passability(&mut self, mask: Vec<bool>) {
+        debug_assert_eq!(mask.len(), self.space.len(), "mask must cover every cell");
+        self.passability = Some(mask);
+    }
+
+    /// The passability mask, if one was installed.
+    pub fn passability(&self) -> Option<&[bool]> {
+        self.passability.as_deref()
     }
 }
 
@@ -107,5 +123,16 @@ mod tests {
         world.add_access_point(2, 2);
         assert_eq!(world.sources(), &[Coord::new(2, 2, Layer::Surface)]);
         assert_eq!(world.access_points(), &[(2, 2)]);
+    }
+
+    #[test]
+    fn passability_defaults_none_and_round_trips() {
+        let space = Grid2p5D::new(2, 2);
+        let mut world = World::new(space, Params::default());
+        assert!(world.passability().is_none());
+        let mask = vec![true; world.space.len()];
+        world.set_passability(mask);
+        assert_eq!(world.passability().unwrap().len(), world.space.len());
+        assert!(world.passability().unwrap().iter().all(|&p| p));
     }
 }

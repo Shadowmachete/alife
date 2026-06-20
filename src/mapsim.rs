@@ -8,8 +8,8 @@
 //! valaar gradient, which keeps them off the foodless ocean.)
 
 use crate::genome::Genome;
-use crate::organism::{Organism, TraitOrganism};
-use crate::params::EcoParams;
+use crate::organism::TraitOrganism;
+use crate::population::Population;
 use crate::sim::Sim;
 use crate::space::{Coord, Grid2p5D, Layer, Space};
 use crate::terrain::CellType;
@@ -31,7 +31,9 @@ pub fn downscale(mats: &[CellType], dw: u32, dh: u32, scale: u32) -> (u32, u32, 
 }
 
 /// A `World` on the sim grid with every `Valaar` cell registered as a surface
-/// source — so valaar flows out of the drawn reservoir and rivers.
+/// source — so valaar flows out of the drawn reservoir and rivers — and a
+/// passability mask derived from the materials (surface block from `mats`,
+/// underground block all-passable).
 pub fn world_from_materials(sw: u32, sh: u32, mats: &[CellType]) -> World<Grid2p5D> {
     let mut world = World::new(Grid2p5D::new(sw, sh), Params::default());
     for y in 0..sh {
@@ -41,6 +43,12 @@ pub fn world_from_materials(sw: u32, sh: u32, mats: &[CellType]) -> World<Grid2p
             }
         }
     }
+    let plane = (sw * sh) as usize;
+    let mut mask = vec![true; world.space.len()]; // both layers; underground all-passable
+    for i in 0..plane {
+        mask[i] = mats[i].passable(); // surface block occupies indices 0..plane
+    }
+    world.set_passability(mask);
     world
 }
 
@@ -86,19 +94,102 @@ pub fn seed_on_fed_land(
     n
 }
 
-/// Packed `0x00RRGGBB` dot colour: hue by diet (green autotroph → red predator),
-/// brightness by stored-energy fraction.
-pub fn dot_color(o: &TraitOrganism, eco: &EcoParams) -> u32 {
-    let frac = (o.energy / o.max_energy(eco)).clamp(0.2, 1.0);
-    let r = (o.genome.diet * 255.0 * frac) as u32;
-    let g = ((1.0 - o.genome.diet) * 255.0 * frac) as u32;
-    let b = (70.0 * frac) as u32;
+/// Packed `0x00RRGGBB` marker colour: hue by diet (green autotroph → red
+/// predator). Brightness is constant — the circle outline carries contrast.
+pub fn marker_color(o: &TraitOrganism) -> u32 {
+    let r = (o.genome.diet * 255.0) as u32;
+    let g = ((1.0 - o.genome.diet) * 255.0) as u32;
+    let b = 60u32;
     (r << 16) | (g << 8) | b
+}
+
+/// Flood-fill connected components of non-Ocean terrain (4-connectivity) on the
+/// `sw×sh` sim plane. Returns a per-cell continent label (`None` for Ocean) and
+/// the number of continents. Deterministic: row-major scan, first-seen labels.
+pub fn label_continents(mats: &[CellType], sw: u32, sh: u32) -> (Vec<Option<u32>>, u32) {
+    let n = (sw * sh) as usize;
+    let mut labels: Vec<Option<u32>> = vec![None; n];
+    let mut next: u32 = 0;
+    for start in 0..n {
+        if mats[start] == CellType::Ocean || labels[start].is_some() {
+            continue;
+        }
+        let label = next;
+        next += 1;
+        labels[start] = Some(label);
+        let mut stack = vec![start];
+        while let Some(i) = stack.pop() {
+            let (x, y) = (i as u32 % sw, i as u32 / sw);
+            let mut neighbors = Vec::with_capacity(4);
+            if x > 0 {
+                neighbors.push(i - 1);
+            }
+            if x + 1 < sw {
+                neighbors.push(i + 1);
+            }
+            if y > 0 {
+                neighbors.push(i - sw as usize);
+            }
+            if y + 1 < sh {
+                neighbors.push(i + sw as usize);
+            }
+            for j in neighbors {
+                if mats[j] != CellType::Ocean && labels[j].is_none() {
+                    labels[j] = Some(label);
+                    stack.push(j);
+                }
+            }
+        }
+    }
+    (labels, next)
+}
+
+/// A snapshot of the living population for the viewer HUD.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct Stats {
+    pub total: usize,
+    pub autotrophs: usize,
+    pub predators: usize,
+    pub mean_size: f32,
+    /// `(continent_label, population)`, sorted by population desc then label asc.
+    pub continents: Vec<(u32, usize)>,
+}
+
+/// Tally the population: diet split (`diet <= 0.5` = autotroph-leaning), mean
+/// body size, and per-continent population using `labels` from
+/// `label_continents`. `sw` is the sim-plane width (to index `labels`).
+pub fn compute_stats(
+    pop: &Population,
+    sw: u32,
+    labels: &[Option<u32>],
+    n_continents: u32,
+) -> Stats {
+    let orgs = pop.organisms();
+    let total = orgs.len();
+    let mut autotrophs = 0usize;
+    let mut size_sum = 0.0f32;
+    let mut per = vec![0usize; n_continents as usize];
+    for o in orgs {
+        if o.genome.diet <= 0.5 {
+            autotrophs += 1;
+        }
+        size_sum += o.genome.size;
+        let idx = (o.pos.y * sw + o.pos.x) as usize;
+        if let Some(Some(label)) = labels.get(idx) {
+            per[*label as usize] += 1;
+        }
+    }
+    let mean_size = if total > 0 { size_sum / total as f32 } else { 0.0 };
+    let mut continents: Vec<(u32, usize)> =
+        per.iter().enumerate().map(|(l, &c)| (l as u32, c)).collect();
+    continents.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    Stats { total, autotrophs, predators: total - autotrophs, mean_size, continents }
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::params::EcoParams;
 
     fn grid(s: &[&str]) -> (u32, u32, Vec<CellType>) {
         let h = s.len() as u32;
@@ -145,5 +236,60 @@ mod tests {
         for o in sim.pop.organisms() {
             assert_eq!(o.pos, Coord::new(1, 0, Layer::Surface), "only the land cell is fed");
         }
+    }
+
+    #[test]
+    fn world_marks_ocean_and_valaar_impassable() {
+        let (w, h, m) = grid(&["OVL"]); // ocean, valaar, land
+        let world = world_from_materials(w, h, &m);
+        let mask = world.passability().expect("mask installed");
+        let idx = |x: u32| world.space.index(Coord::new(x, 0, Layer::Surface));
+        assert!(!mask[idx(0)], "ocean impassable");
+        assert!(!mask[idx(1)], "valaar impassable");
+        assert!(mask[idx(2)], "land passable");
+    }
+
+    #[test]
+    fn marker_color_greens_autotrophs_reds_predators() {
+        let c = Coord::new(0, 0, Layer::Surface);
+        let auto = TraitOrganism::new(
+            Genome::from_array([0.5, 0.5, 0.5, 0.0, 0.5, 0.5, 0.5, 0.5]), c, 1.0);
+        let pred = TraitOrganism::new(
+            Genome::from_array([0.5, 0.5, 0.5, 1.0, 0.5, 0.5, 0.5, 0.5]), c, 1.0);
+        let green = |p: u32| (p >> 8) & 0xFF;
+        let red = |p: u32| (p >> 16) & 0xFF;
+        assert!(green(marker_color(&auto)) > red(marker_color(&auto)));
+        assert!(red(marker_color(&pred)) > green(marker_color(&pred)));
+    }
+
+    #[test]
+    fn continents_split_on_ocean_only() {
+        let (w, h, m) = grid(&["LOLL"]); // Land | Ocean | Land Land
+        let (labels, n) = label_continents(&m, w, h);
+        assert_eq!(n, 2);
+        assert_eq!(labels[0], Some(0));
+        assert_eq!(labels[1], None); // ocean
+        assert_eq!(labels[2], Some(1));
+        assert_eq!(labels[3], Some(1));
+    }
+
+    #[test]
+    fn compute_stats_tallies_diet_size_and_continents() {
+        let (w, _h, m) = grid(&["LOLL"]);
+        let (labels, n) = label_continents(&m, w, 1);
+        let mut pop = Population::new();
+        let g = |diet: f32, size: f32| {
+            Genome::from_array([size, 0.5, 0.5, diet, 0.5, 0.5, 0.5, 0.5])
+        };
+        pop.spawn(TraitOrganism::new(g(0.0, 0.2), Coord::new(0, 0, Layer::Surface), 1.0));
+        pop.spawn(TraitOrganism::new(g(0.0, 0.4), Coord::new(0, 0, Layer::Surface), 1.0));
+        pop.spawn(TraitOrganism::new(g(1.0, 0.6), Coord::new(2, 0, Layer::Surface), 1.0));
+
+        let s = compute_stats(&pop, w, &labels, n);
+        assert_eq!(s.total, 3);
+        assert_eq!(s.autotrophs, 2);
+        assert_eq!(s.predators, 1);
+        assert!((s.mean_size - 0.4).abs() < 1e-6);
+        assert_eq!(s.continents, vec![(0, 2), (1, 1)]);
     }
 }

@@ -66,15 +66,18 @@ pub fn cull_and_recycle<S: Space>(
     pop.retain(|o| o.is_alive(eco));
 }
 
-/// Each organism moves with probability `speed` toward its richest in-bounds
-/// planar neighbour (gradient ascent on valaar). Moving costs `move_cost·speed`.
-/// Neighbours never cross layers, so organisms stay on their layer.
+/// Each organism moves with probability `speed` toward its richest in-bounds,
+/// **passable** planar neighbour (gradient ascent on valaar). Moving costs
+/// `move_cost·speed`. `passable`: `None` = no terrain constraint; `Some(mask)`
+/// (sized to `space.len()`) bars stepping into cells where `mask[index]` is
+/// false. Neighbours never cross layers, so organisms stay on their layer.
 pub fn move_organisms<S: Space>(
     space: &S,
     field: &Field,
     pop: &mut Population,
     eco: &EcoParams,
     rng: &mut Rng,
+    passable: Option<&[bool]>,
 ) {
     for o in pop.organisms_mut() {
         // Draw first so the rng stream advances once per organism regardless.
@@ -84,7 +87,13 @@ pub fn move_organisms<S: Space>(
         let mut best = o.pos;
         let mut best_v = field.get(space.index(o.pos));
         for n in space.planar_neighbors(o.pos) {
-            let v = field.get(space.index(n));
+            let ni = space.index(n);
+            if let Some(mask) = passable {
+                if !mask[ni] {
+                    continue; // impassable terrain blocks the step
+                }
+            }
+            let v = field.get(ni);
             if v > best_v {
                 best_v = v;
                 best = n;
@@ -314,7 +323,7 @@ mod tests {
         // speed 1.0 => always moves.
         pop.spawn(TraitOrganism::new(Genome::from_array([0.5, 1.0, 1.0, 0.0, 0.9, 0.5, 0.5, 0.5]), start, 5.0));
         let mut rng = Rng::new(1);
-        move_organisms(&space, &field, &mut pop, &eco, &mut rng);
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng, None);
         assert_eq!(pop.organisms()[0].pos, Coord::new(2, 0, Layer::Surface));
         assert!(pop.organisms()[0].energy < 5.0, "moving costs energy");
     }
@@ -329,8 +338,54 @@ mod tests {
         let mut pop = Population::new();
         pop.spawn(TraitOrganism::new(Genome::from_array([0.5, 1.0, 1.0, 0.0, 0.9, 0.5, 0.5, 0.5]), peak, 5.0));
         let mut rng = Rng::new(1);
-        move_organisms(&space, &field, &mut pop, &eco, &mut rng);
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng, None);
         assert_eq!(pop.organisms()[0].pos, peak);
+        assert_eq!(pop.organisms()[0].energy, 5.0, "no move, no cost");
+    }
+
+    #[test]
+    fn does_not_step_onto_impassable_richer_neighbor() {
+        let space = Grid2p5D::new(4, 1);
+        let eco = EcoParams::default();
+        let mut field = crate::field::Field::zeros(space.len());
+        for x in 0..4u32 {
+            field.set(space.index(Coord::new(x, 0, Layer::Surface)), x as f32);
+        }
+        let mut mask = vec![true; space.len()];
+        mask[space.index(Coord::new(3, 0, Layer::Surface))] = false; // richest cell barred
+        let start = Coord::new(2, 0, Layer::Surface);
+        let mut pop = Population::new();
+        pop.spawn(TraitOrganism::new(
+            Genome::from_array([0.5, 1.0, 1.0, 0.0, 0.9, 0.5, 0.5, 0.5]),
+            start,
+            5.0,
+        ));
+        let mut rng = Rng::new(1);
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&mask));
+        assert_eq!(pop.organisms()[0].pos, start, "must not enter an impassable cell");
+    }
+
+    #[test]
+    fn boxed_in_organism_stays_and_pays_nothing() {
+        let space = Grid2p5D::new(3, 1);
+        let eco = EcoParams::default();
+        let mut field = crate::field::Field::zeros(space.len());
+        for x in 0..3u32 {
+            field.set(space.index(Coord::new(x, 0, Layer::Surface)), x as f32);
+        }
+        let mut mask = vec![true; space.len()];
+        mask[space.index(Coord::new(0, 0, Layer::Surface))] = false;
+        mask[space.index(Coord::new(2, 0, Layer::Surface))] = false;
+        let center = Coord::new(1, 0, Layer::Surface);
+        let mut pop = Population::new();
+        pop.spawn(TraitOrganism::new(
+            Genome::from_array([0.5, 1.0, 1.0, 0.0, 0.9, 0.5, 0.5, 0.5]),
+            center,
+            5.0,
+        ));
+        let mut rng = Rng::new(1);
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&mask));
+        assert_eq!(pop.organisms()[0].pos, center);
         assert_eq!(pop.organisms()[0].energy, 5.0, "no move, no cost");
     }
 
