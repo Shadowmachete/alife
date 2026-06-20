@@ -53,6 +53,34 @@ impl Scene {
     }
 }
 
+/// Build a live `Scene::Tiles` from an in-memory `.tmx` string and `.rgba` atlas
+/// bytes. Shared by the native (file-backed) and wasm (embedded) loaders so the
+/// scene-construction logic lives in one place.
+fn build_tile_scene(xml: &str, atlas_bytes: &[u8]) -> Scene {
+    let map = parse_tmx(xml).unwrap_or_else(|e| panic!("parse tmx: {e}"));
+    let atlas = Atlas::load(atlas_bytes).unwrap_or_else(|e| panic!("atlas: {e}"));
+
+    let mats = material_grid(&map, &atlas);
+    let (sw, sh, sim_mats) = downscale(&mats, map.width, map.height, SIM_SCALE);
+    let (continents, n_continents) = label_continents(&sim_mats, sw, sh);
+    let world = world_from_materials(sw, sh, &sim_mats);
+    let mut sim = Sim::new(world, EcoParams::default(), 0xA11FE);
+    for _ in 0..WARM_STEPS {
+        sim.world.step();
+    }
+    let mut t = TileSim {
+        map,
+        atlas,
+        sim,
+        mats: sim_mats,
+        continents,
+        n_continents,
+        running: true,
+    };
+    t.reseed();
+    Scene::Tiles(Box::new(t))
+}
+
 fn load_scene(path: &str) -> Scene {
     if path.ends_with(".tmx") {
         let xml = std::fs::read_to_string(path).unwrap_or_else(|e| panic!("read {path}: {e}"));
@@ -63,27 +91,7 @@ fn load_scene(path: &str) -> Scene {
         let bytes = std::fs::read(&atlas_path).unwrap_or_else(|e| {
             panic!("read atlas {}: {e}\nBake it first: `python3 tools/png_to_rgba.py`", atlas_path.display())
         });
-        let atlas = Atlas::load(&bytes).unwrap_or_else(|e| panic!("atlas {}: {e}", atlas_path.display()));
-
-        let mats = material_grid(&map, &atlas);
-        let (sw, sh, sim_mats) = downscale(&mats, map.width, map.height, SIM_SCALE);
-        let (continents, n_continents) = label_continents(&sim_mats, sw, sh);
-        let world = world_from_materials(sw, sh, &sim_mats);
-        let mut sim = Sim::new(world, EcoParams::default(), 0xA11FE);
-        for _ in 0..WARM_STEPS {
-            sim.world.step();
-        }
-        let mut t = TileSim {
-            map,
-            atlas,
-            sim,
-            mats: sim_mats,
-            continents,
-            n_continents,
-            running: true,
-        };
-        t.reseed();
-        Scene::Tiles(Box::new(t))
+        build_tile_scene(&xml, &bytes)
     } else {
         let map = load_json(Path::new(path)).unwrap_or_else(|e| {
             panic!("load map {path}: {e}\nBuild one first, e.g. `python3 tools/sketch_to_map.py <sketch.png>`.")
