@@ -225,6 +225,15 @@ pub fn predate<S: Space>(space: &S, pop: &mut Population, eco: &EcoParams) {
     }
 }
 
+/// Remove organisms standing on any of `drowned` (surface-plane cell indices) —
+/// e.g. when a land bridge sinks back to ocean beneath them.
+pub fn drown<S: Space>(space: &S, pop: &mut Population, drowned: &[usize]) {
+    if drowned.is_empty() {
+        return;
+    }
+    pop.retain(|o| !drowned.contains(&space.index(o.pos)));
+}
+
 /// Asexual reproduction: any organism at or above its energy threshold spawns
 /// one child in its own cell. The child takes `repro_cost_fraction` of the
 /// parent's energy and a mutated copy of its genome. Children are collected
@@ -627,6 +636,18 @@ mod tests {
         let mut rng = Rng::new(3);
         reproduce(&mut pop, &eco, &mut rng);
         assert_eq!(pop.len(), 1);
+    }
+
+    #[test]
+    fn drown_removes_organisms_on_sunk_cells() {
+        let space = Grid2p5D::new(3, 1);
+        let mut pop = Population::new();
+        pop.spawn(TraitOrganism::new(genome(0.0, 1.0), Coord::new(0, 0, Layer::Surface), 1.0));
+        pop.spawn(TraitOrganism::new(genome(0.0, 1.0), Coord::new(1, 0, Layer::Surface), 1.0));
+        let sunk = vec![space.index(Coord::new(1, 0, Layer::Surface))];
+        drown(&space, &mut pop, &sunk);
+        assert_eq!(pop.len(), 1);
+        assert_eq!(pop.organisms()[0].pos, Coord::new(0, 0, Layer::Surface));
     }
 
     // genome with explicit tolerances: [size, eff, speed, diet, repro, lifespan, heat_tol, drought_tol]
