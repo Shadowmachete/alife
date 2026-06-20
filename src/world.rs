@@ -37,6 +37,10 @@ pub struct World<S: Space> {
     /// Per-cell passability (sized to `space.len()`); `None` = everywhere
     /// passable. Set from the terrain map; consumed by `ecology::move_organisms`.
     passability: Option<Vec<bool>>,
+    /// Per-cell "swimmable" mask (sized to `space.len()`): `true` where a
+    /// swimming organism may enter despite the cell being impassable in
+    /// `passability` (i.e. Valaar). `None` = nothing is swimmable.
+    swimmable: Option<Vec<bool>>,
 }
 
 impl<S: Space> World<S> {
@@ -49,6 +53,7 @@ impl<S: Space> World<S> {
             sources: Vec::new(),
             access_points: Vec::new(),
             passability: None,
+            swimmable: None,
         }
     }
 
@@ -81,6 +86,18 @@ impl<S: Space> World<S> {
     /// The passability mask, if one was installed.
     pub fn passability(&self) -> Option<&[bool]> {
         self.passability.as_deref()
+    }
+
+    /// Install a per-cell swimmable mask (`true` = a swimmer may enter). Length
+    /// must equal `space.len()` (all layers, `Space::index` order).
+    pub fn set_swimmable(&mut self, mask: Vec<bool>) {
+        debug_assert_eq!(mask.len(), self.space.len(), "mask must cover every cell");
+        self.swimmable = Some(mask);
+    }
+
+    /// The swimmable mask, if one was installed.
+    pub fn swimmable(&self) -> Option<&[bool]> {
+        self.swimmable.as_deref()
     }
 }
 
@@ -134,5 +151,17 @@ mod tests {
         world.set_passability(mask);
         assert_eq!(world.passability().unwrap().len(), world.space.len());
         assert!(world.passability().unwrap().iter().all(|&p| p));
+    }
+
+    #[test]
+    fn swimmable_defaults_none_and_round_trips() {
+        let space = Grid2p5D::new(2, 2);
+        let mut world = World::new(space, Params::default());
+        assert!(world.swimmable().is_none());
+        let mut mask = vec![false; world.space.len()];
+        mask[0] = true;
+        world.set_swimmable(mask);
+        assert_eq!(world.swimmable().unwrap().len(), world.space.len());
+        assert!(world.swimmable().unwrap()[0]);
     }
 }
