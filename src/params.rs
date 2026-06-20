@@ -37,6 +37,14 @@ pub struct EcoParams {
     pub initial_energy: f32,
     /// Energy a tunneller spends per Valaar cell crossed when it swims through.
     pub valaar_drain: f32,
+    /// Mutation magnitude multiplier where local valaar is ~0 (the Dusk).
+    pub mutation_floor_mult: f32,
+    /// Mutation magnitude multiplier where local valaar >= `mutation_ref` (core).
+    pub mutation_ceil_mult: f32,
+    /// Local valaar at/above which mutation reaches `mutation_ceil_mult`.
+    pub mutation_ref: f32,
+    /// Extra mutation multiplier during the Rasgun surge.
+    pub rasgun_mutation_mult: f32,
 }
 
 impl Default for EcoParams {
@@ -51,13 +59,17 @@ impl Default for EcoParams {
             detritus_fraction: 0.8,
             repro_cost_fraction: 0.4,
             mutation_rate: 0.1,
-            min_lifespan: 20,
-            max_lifespan: 200,
+            min_lifespan: 200,
+            max_lifespan: 800,
             predation_efficiency: 0.9,
             heat_stress: 0.1,
             drought_stress: 0.1,
             initial_energy: 4.0,
             valaar_drain: 0.15,
+            mutation_floor_mult: 0.25,
+            mutation_ceil_mult: 2.0,
+            mutation_ref: 4.0,
+            rasgun_mutation_mult: 2.0,
         }
     }
 }
@@ -70,5 +82,13 @@ mod tests {
     fn valaar_drain_default_is_present() {
         let eco = EcoParams::default();
         assert!(eco.valaar_drain > 0.0);
+    }
+
+    #[test]
+    fn mutation_field_defaults_present() {
+        let eco = EcoParams::default();
+        assert!(eco.mutation_floor_mult < eco.mutation_ceil_mult);
+        assert!(eco.mutation_ref > 0.0);
+        assert!(eco.rasgun_mutation_mult > 1.0);
     }
 }

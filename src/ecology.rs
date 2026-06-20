@@ -11,6 +11,7 @@ use crate::organism::{Organism, TraitOrganism};
 use crate::params::EcoParams;
 use crate::population::Population;
 use crate::rng::Rng;
+use crate::season::Season;
 use crate::space::{Coord, Space};
 
 /// Autotrophy: each organism with an autotroph fraction `(1 - diet)` draws
@@ -232,6 +233,17 @@ pub fn drown<S: Space>(space: &S, pop: &mut Population, drowned: &[usize]) {
         return;
     }
     pop.retain(|o| !drowned.contains(&space.index(o.pos)));
+}
+
+/// Per-organism mutation magnitude at birth: the base `mutation_rate` scaled by
+/// local valaar (Dusk -> `mutation_floor_mult`, Rasconne core -> `mutation_ceil_mult`,
+/// linear between, normalised against `mutation_ref`) and multiplied by
+/// `rasgun_mutation_mult` during Rasgun.
+pub fn mutation_rate(eco: &EcoParams, local_valaar: f32, season: Season) -> f32 {
+    let t = (local_valaar / eco.mutation_ref).clamp(0.0, 1.0);
+    let valaar_mult = eco.mutation_floor_mult + (eco.mutation_ceil_mult - eco.mutation_floor_mult) * t;
+    let season_mult = if season == Season::Rasgun { eco.rasgun_mutation_mult } else { 1.0 };
+    eco.mutation_rate * valaar_mult * season_mult
 }
 
 /// Asexual reproduction: any organism at or above its energy threshold spawns
@@ -636,6 +648,24 @@ mod tests {
         let mut rng = Rng::new(3);
         reproduce(&mut pop, &eco, &mut rng);
         assert_eq!(pop.len(), 1);
+    }
+
+    #[test]
+    fn mutation_rate_floors_in_the_dusk_and_peaks_in_the_core() {
+        let eco = EcoParams::default();
+        let dusk = mutation_rate(&eco, 0.0, Season::Goscon);
+        let core = mutation_rate(&eco, eco.mutation_ref, Season::Goscon);
+        assert!((dusk - eco.mutation_rate * eco.mutation_floor_mult).abs() < 1e-6);
+        assert!((core - eco.mutation_rate * eco.mutation_ceil_mult).abs() < 1e-6);
+        assert!(core > dusk);
+    }
+
+    #[test]
+    fn rasgun_amplifies_mutation() {
+        let eco = EcoParams::default();
+        let normal = mutation_rate(&eco, eco.mutation_ref, Season::Goscon);
+        let rasgun = mutation_rate(&eco, eco.mutation_ref, Season::Rasgun);
+        assert!((rasgun - normal * eco.rasgun_mutation_mult).abs() < 1e-5);
     }
 
     #[test]
