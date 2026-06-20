@@ -49,6 +49,11 @@ pub fn world_from_materials(sw: u32, sh: u32, mats: &[CellType]) -> World<Grid2p
         mask[i] = mats[i].passable(); // surface block occupies indices 0..plane
     }
     world.set_passability(mask);
+    let mut swim = vec![false; world.space.len()]; // underground: nothing swimmable
+    for i in 0..plane {
+        swim[i] = mats[i] == CellType::Valaar; // only Valaar opens to swimmers
+    }
+    world.set_swimmable(swim);
     world
 }
 
@@ -248,6 +253,17 @@ mod tests {
         assert!(!mask[idx(0)], "ocean impassable");
         assert!(!mask[idx(1)], "valaar impassable");
         assert!(mask[idx(2)], "land passable");
+    }
+
+    #[test]
+    fn world_marks_only_valaar_swimmable() {
+        let (w, h, m) = grid(&["OVL"]); // ocean, valaar, land
+        let world = world_from_materials(w, h, &m);
+        let mask = world.swimmable().expect("swimmable mask installed");
+        let idx = |x: u32| world.space.index(Coord::new(x, 0, Layer::Surface));
+        assert!(!mask[idx(0)], "ocean is not swimmable");
+        assert!(mask[idx(1)], "valaar is swimmable");
+        assert!(!mask[idx(2)], "land is not swimmable");
     }
 
     #[test]
