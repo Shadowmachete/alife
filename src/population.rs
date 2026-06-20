@@ -57,12 +57,12 @@ impl Population {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::genome::Genome;
+    use crate::genome::{Genome, TRAIT_COUNT};
     use crate::organism::TraitOrganism;
     use crate::space::{Coord, Grid2p5D, Layer, Space};
 
     fn org_at(c: Coord) -> TraitOrganism {
-        TraitOrganism::new(Genome::from_array([0.5; 8]), c, 1.0)
+        TraitOrganism::new(Genome::from_array([0.5; TRAIT_COUNT]), c, 1.0)
     }
 
     #[test]

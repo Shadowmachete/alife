@@ -26,7 +26,7 @@ fn seeded_sim(seed: u64) -> Sim<Grid2p5D> {
         let gy = (h / 2).saturating_sub(3) + (rng.next_unit() * 6.0) as u32;
         let pos = Coord::new(gx.min(w - 1), gy.min(h - 1), Layer::Surface);
         // Low diet (autotroph), moderate everything else.
-        let g = Genome::from_array([0.4, 0.7, 0.3, 0.2, 0.5, 0.6, 0.6, 0.6]);
+        let g = Genome::from_array([0.4, 0.7, 0.3, 0.2, 0.5, 0.6, 0.6, 0.6, 0.0]);
         sim.seed_organism(TraitOrganism::new(g, pos, sim.eco.initial_energy));
     }
     sim
@@ -80,8 +80,8 @@ fn drought_selects_for_drought_tolerance() {
     }
     // Two co-located lineages: one drought/heat tolerant, one not.
     for _ in 0..20 {
-        let tough = Genome::from_array([0.3, 0.8, 0.1, 0.0, 0.4, 0.6, 0.9, 0.9]);
-        let frail = Genome::from_array([0.3, 0.8, 0.1, 0.0, 0.4, 0.6, 0.1, 0.1]);
+        let tough = Genome::from_array([0.3, 0.8, 0.1, 0.0, 0.4, 0.6, 0.9, 0.9, 0.0]);
+        let frail = Genome::from_array([0.3, 0.8, 0.1, 0.0, 0.4, 0.6, 0.1, 0.1, 0.0]);
         sim.seed_organism(TraitOrganism::new(tough, Coord::new(4, 4, Layer::Surface), sim.eco.initial_energy));
         sim.seed_organism(TraitOrganism::new(frail, Coord::new(4, 4, Layer::Surface), sim.eco.initial_energy));
     }

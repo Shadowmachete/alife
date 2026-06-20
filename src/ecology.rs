@@ -210,7 +210,7 @@ mod tests {
 
     // [size, valaar_efficiency, speed, diet, repro_threshold, lifespan, heat_tol, drought_tol]
     fn genome(diet: f32, eff: f32) -> Genome {
-        Genome::from_array([0.5, eff, 0.0, diet, 0.9, 0.5, 0.5, 0.5])
+        Genome::from_array([0.5, eff, 0.0, diet, 0.9, 0.5, 0.5, 0.5, 0.5])
     }
 
     #[test]
@@ -321,7 +321,7 @@ mod tests {
         let start = Coord::new(1, 0, Layer::Surface);
         let mut pop = Population::new();
         // speed 1.0 => always moves.
-        pop.spawn(TraitOrganism::new(Genome::from_array([0.5, 1.0, 1.0, 0.0, 0.9, 0.5, 0.5, 0.5]), start, 5.0));
+        pop.spawn(TraitOrganism::new(Genome::from_array([0.5, 1.0, 1.0, 0.0, 0.9, 0.5, 0.5, 0.5, 0.5]), start, 5.0));
         let mut rng = Rng::new(1);
         move_organisms(&space, &field, &mut pop, &eco, &mut rng, None);
         assert_eq!(pop.organisms()[0].pos, Coord::new(2, 0, Layer::Surface));
@@ -336,7 +336,7 @@ mod tests {
         let peak = Coord::new(2, 0, Layer::Surface);
         field.set(space.index(peak), 100.0);
         let mut pop = Population::new();
-        pop.spawn(TraitOrganism::new(Genome::from_array([0.5, 1.0, 1.0, 0.0, 0.9, 0.5, 0.5, 0.5]), peak, 5.0));
+        pop.spawn(TraitOrganism::new(Genome::from_array([0.5, 1.0, 1.0, 0.0, 0.9, 0.5, 0.5, 0.5, 0.5]), peak, 5.0));
         let mut rng = Rng::new(1);
         move_organisms(&space, &field, &mut pop, &eco, &mut rng, None);
         assert_eq!(pop.organisms()[0].pos, peak);
@@ -356,7 +356,7 @@ mod tests {
         let start = Coord::new(2, 0, Layer::Surface);
         let mut pop = Population::new();
         pop.spawn(TraitOrganism::new(
-            Genome::from_array([0.5, 1.0, 1.0, 0.0, 0.9, 0.5, 0.5, 0.5]),
+            Genome::from_array([0.5, 1.0, 1.0, 0.0, 0.9, 0.5, 0.5, 0.5, 0.5]),
             start,
             5.0,
         ));
@@ -379,7 +379,7 @@ mod tests {
         let center = Coord::new(1, 0, Layer::Surface);
         let mut pop = Population::new();
         pop.spawn(TraitOrganism::new(
-            Genome::from_array([0.5, 1.0, 1.0, 0.0, 0.9, 0.5, 0.5, 0.5]),
+            Genome::from_array([0.5, 1.0, 1.0, 0.0, 0.9, 0.5, 0.5, 0.5, 0.5]),
             center,
             5.0,
         ));
@@ -391,10 +391,10 @@ mod tests {
 
     // [size, eff, speed, diet, repro_threshold, lifespan, heat_tol, drought_tol]
     fn predator(size: f32) -> Genome {
-        Genome::from_array([size, 1.0, 0.0, 1.0, 0.9, 0.5, 0.5, 0.5])
+        Genome::from_array([size, 1.0, 0.0, 1.0, 0.9, 0.5, 0.5, 0.5, 0.5])
     }
     fn prey(size: f32) -> Genome {
-        Genome::from_array([size, 1.0, 0.0, 0.0, 0.9, 0.5, 0.5, 0.5])
+        Genome::from_array([size, 1.0, 0.0, 0.0, 0.9, 0.5, 0.5, 0.5, 0.5])
     }
 
     #[test]
@@ -444,7 +444,7 @@ mod tests {
         let c = Coord::new(1, 1, Layer::Surface);
         let mut pop = Population::new();
         // repro_threshold 0.0 => any positive energy triggers reproduction.
-        let g = Genome::from_array([0.5, 1.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5]);
+        let g = Genome::from_array([0.5, 1.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 0.5]);
         let parent = TraitOrganism::new(g, c, 5.0);
         pop.spawn(parent);
         let mut rng = Rng::new(3);
@@ -463,7 +463,7 @@ mod tests {
         let c = Coord::new(1, 1, Layer::Surface);
         let mut pop = Population::new();
         // repro_threshold 1.0 => needs full storage; give it almost none.
-        let g = Genome::from_array([0.5, 1.0, 0.0, 0.0, 1.0, 0.5, 0.5, 0.5]);
+        let g = Genome::from_array([0.5, 1.0, 0.0, 0.0, 1.0, 0.5, 0.5, 0.5, 0.5]);
         pop.spawn(TraitOrganism::new(g, c, 0.1));
         let mut rng = Rng::new(3);
         reproduce(&mut pop, &eco, &mut rng);
@@ -472,7 +472,7 @@ mod tests {
 
     // genome with explicit tolerances: [size, eff, speed, diet, repro, lifespan, heat_tol, drought_tol]
     fn tol_genome(heat_tol: f32, drought_tol: f32) -> Genome {
-        Genome::from_array([0.5, 1.0, 0.0, 0.0, 0.9, 0.5, heat_tol, drought_tol])
+        Genome::from_array([0.5, 1.0, 0.0, 0.0, 0.9, 0.5, heat_tol, drought_tol, 0.5])
     }
 
     #[test]
