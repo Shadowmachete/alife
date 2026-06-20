@@ -67,10 +67,11 @@ pub fn cull_and_recycle<S: Space>(
 }
 
 /// Each organism moves with probability `speed` toward its richest in-bounds,
-/// **passable** planar neighbour (gradient ascent on valaar). Moving costs
-/// `move_cost·speed`. `passable`: `None` = no terrain constraint; `Some(mask)`
-/// (sized to `space.len()`) bars stepping into cells where `mask[index]` is
-/// false. Neighbours never cross layers, so organisms stay on their layer.
+/// **enterable** planar neighbour (gradient ascent on valaar). Moving costs
+/// `move_cost·speed`. A non-swimmer may enter a cell only where `passable`
+/// allows (`None` = no terrain constraint); a swimmer (`can_swim`) may also
+/// enter a `swimmable` cell (Valaar). Cells barred to all (ocean/mountain/rock)
+/// are false in both masks. Neighbours never cross layers.
 pub fn move_organisms<S: Space>(
     space: &S,
     field: &Field,
@@ -78,20 +79,29 @@ pub fn move_organisms<S: Space>(
     eco: &EcoParams,
     rng: &mut Rng,
     passable: Option<&[bool]>,
+    swimmable: Option<&[bool]>,
 ) {
     for o in pop.organisms_mut() {
         // Draw first so the rng stream advances once per organism regardless.
         if rng.next_unit() >= o.genome.speed {
             continue;
         }
+        let can_swim = o.can_swim(eco);
         let mut best = o.pos;
         let mut best_v = field.get(space.index(o.pos));
         for n in space.planar_neighbors(o.pos) {
             let ni = space.index(n);
-            if let Some(mask) = passable {
-                if !mask[ni] {
-                    continue; // impassable terrain blocks the step
-                }
+            let open = match passable {
+                Some(m) => m[ni],
+                None => true,
+            };
+            let swim_ok = can_swim
+                && match swimmable {
+                    Some(m) => m[ni],
+                    None => false,
+                };
+            if !open && !swim_ok {
+                continue; // impassable terrain blocks the step
             }
             let v = field.get(ni);
             if v > best_v {
@@ -323,7 +333,7 @@ mod tests {
         // speed 1.0 => always moves.
         pop.spawn(TraitOrganism::new(Genome::from_array([0.5, 1.0, 1.0, 0.0, 0.9, 0.5, 0.5, 0.5, 0.5]), start, 5.0));
         let mut rng = Rng::new(1);
-        move_organisms(&space, &field, &mut pop, &eco, &mut rng, None);
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng, None, None);
         assert_eq!(pop.organisms()[0].pos, Coord::new(2, 0, Layer::Surface));
         assert!(pop.organisms()[0].energy < 5.0, "moving costs energy");
     }
@@ -338,7 +348,7 @@ mod tests {
         let mut pop = Population::new();
         pop.spawn(TraitOrganism::new(Genome::from_array([0.5, 1.0, 1.0, 0.0, 0.9, 0.5, 0.5, 0.5, 0.5]), peak, 5.0));
         let mut rng = Rng::new(1);
-        move_organisms(&space, &field, &mut pop, &eco, &mut rng, None);
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng, None, None);
         assert_eq!(pop.organisms()[0].pos, peak);
         assert_eq!(pop.organisms()[0].energy, 5.0, "no move, no cost");
     }
@@ -361,7 +371,7 @@ mod tests {
             5.0,
         ));
         let mut rng = Rng::new(1);
-        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&mask));
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&mask), None);
         assert_eq!(pop.organisms()[0].pos, start, "must not enter an impassable cell");
     }
 
@@ -384,9 +394,58 @@ mod tests {
             5.0,
         ));
         let mut rng = Rng::new(1);
-        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&mask));
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&mask), None);
         assert_eq!(pop.organisms()[0].pos, center);
         assert_eq!(pop.organisms()[0].energy, 5.0, "no move, no cost");
+    }
+
+    // [size, eff, speed, diet, repro, lifespan, heat_tol, drought_tol, swim]
+    fn swimmer(swim: f32) -> Genome {
+        Genome::from_array([0.5, 1.0, 1.0, 0.0, 0.9, 0.5, 0.5, 0.5, swim])
+    }
+
+    #[test]
+    fn swimmer_enters_richer_valaar_cell() {
+        let space = Grid2p5D::new(2, 1);
+        let eco = EcoParams::default();
+        let mut field = crate::field::Field::zeros(space.len());
+        field.set(space.index(Coord::new(0, 0, Layer::Surface)), 1.0);
+        field.set(space.index(Coord::new(1, 0, Layer::Surface)), 9.0); // richer
+        let mut passable = vec![true; space.len()];
+        let mut swimmable = vec![false; space.len()];
+        let valaar = space.index(Coord::new(1, 0, Layer::Surface));
+        passable[valaar] = false; // impassable to walkers
+        swimmable[valaar] = true; // but it is Valaar
+        let start = Coord::new(0, 0, Layer::Surface);
+        let mut pop = Population::new();
+        pop.spawn(TraitOrganism::new(swimmer(0.9), start, 5.0));
+        let mut rng = Rng::new(1);
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&passable), Some(&swimmable));
+        assert_eq!(
+            pop.organisms()[0].pos,
+            Coord::new(1, 0, Layer::Surface),
+            "a swimmer crosses into valaar"
+        );
+    }
+
+    #[test]
+    fn non_swimmer_is_blocked_from_valaar() {
+        let space = Grid2p5D::new(2, 1);
+        let eco = EcoParams::default();
+        let mut field = crate::field::Field::zeros(space.len());
+        field.set(space.index(Coord::new(0, 0, Layer::Surface)), 1.0);
+        field.set(space.index(Coord::new(1, 0, Layer::Surface)), 9.0);
+        let mut passable = vec![true; space.len()];
+        let mut swimmable = vec![false; space.len()];
+        let valaar = space.index(Coord::new(1, 0, Layer::Surface));
+        passable[valaar] = false;
+        swimmable[valaar] = true;
+        let start = Coord::new(0, 0, Layer::Surface);
+        let mut pop = Population::new();
+        pop.spawn(TraitOrganism::new(swimmer(0.1), start, 5.0)); // gene below threshold
+        let mut rng = Rng::new(1);
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&passable), Some(&swimmable));
+        assert_eq!(pop.organisms()[0].pos, start, "a non-swimmer cannot enter valaar");
     }
 
     // [size, eff, speed, diet, repro_threshold, lifespan, heat_tol, drought_tol]

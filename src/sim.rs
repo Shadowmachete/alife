@@ -86,6 +86,7 @@ impl<S: Space> Sim<S> {
             &self.eco,
             &mut self.rng,
             self.world.passability(),
+            self.world.swimmable(),
         );
         ecology::predate(&self.world.space, &mut self.pop, &self.eco);
         ecology::environmental_stress(&self.world.space, &self.heat, &self.water, &mut self.pop, &self.eco);
