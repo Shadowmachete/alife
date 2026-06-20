@@ -26,7 +26,9 @@ are the same resource).
   valaar). Each season rewards a *different* adaptation — the edge-of-chaos engine.
 - **Every environmental axis has a matching gene** (you can't adapt to what you
   can't sense): valaar↔`valaar_efficiency`, heat↔`heat_tolerance`,
-  water↔`drought_tolerance`.
+  water↔`drought_tolerance`. A `swim` gene lets life cross Valaar (impassable to
+  others) at an extra energy cost; left unused it decays over ~2 generations
+  (Lamarckian, toggled by `EcoParams::swim_disuse_limit`).
 
 Full design rationale lives in `docs/` and the idea notes; the engine constraints
 it satisfies are the ones that make genuine emergence possible (spatial
@@ -109,7 +111,7 @@ src/
   valaar.rs       valaar dynamics (inject / diffuse / layer-exchange / decay)
   world.rs        World = Space + valaar field + sources/access points
   rng.rs          deterministic PRNG
-  genome.rs       trait-vector genome (8 traits)
+  genome.rs       trait-vector genome (9 traits, incl. swim)
   organism.rs     Organism trait + TraitOrganism (first clade)
   population.rs    organism store + occupancy index
   params.rs       EcoParams — every ecology rate as a dial
