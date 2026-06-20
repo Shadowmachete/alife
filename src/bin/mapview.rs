@@ -274,6 +274,7 @@ impl eframe::App for MapApp {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 fn main() -> eframe::Result {
     let path = std::env::args().nth(1).unwrap_or_else(|| "assets/alife_map_blended.tmx".into());
     let native_options = eframe::NativeOptions::default();
@@ -282,4 +283,32 @@ fn main() -> eframe::Result {
         native_options,
         Box::new(move |_cc| Ok(Box::new(MapApp::new(&path)))),
     )
+}
+
+/// Web entry: mount the eframe app onto the `<canvas id="the_canvas_id">` that
+/// `index.html` provides. (Trunk calls `main` automatically.)
+#[cfg(target_arch = "wasm32")]
+fn main() {
+    use eframe::wasm_bindgen::JsCast as _;
+
+    let web_options = eframe::WebOptions::default();
+    wasm_bindgen_futures::spawn_local(async {
+        let document = web_sys::window()
+            .expect("no window")
+            .document()
+            .expect("no document");
+        let canvas = document
+            .get_element_by_id("the_canvas_id")
+            .expect("missing canvas #the_canvas_id")
+            .dyn_into::<web_sys::HtmlCanvasElement>()
+            .expect("#the_canvas_id is not a <canvas>");
+        eframe::WebRunner::new()
+            .start(
+                canvas,
+                web_options,
+                Box::new(|_cc| Ok(Box::new(MapApp::new("")))), // path ignored on wasm
+            )
+            .await
+            .expect("failed to start eframe");
+    });
 }
