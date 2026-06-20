@@ -26,9 +26,9 @@ are the same resource).
   valaar). Each season rewards a *different* adaptation — the edge-of-chaos engine.
 - **Every environmental axis has a matching gene** (you can't adapt to what you
   can't sense): valaar↔`valaar_efficiency`, heat↔`heat_tolerance`,
-  water↔`drought_tolerance`. A `swim` gene lets life cross Valaar (impassable to
-  others) at an extra energy cost; left unused it decays over ~2 generations
-  (Lamarckian, toggled by `EcoParams::swim_disuse_limit`).
+  water↔`drought_tolerance`. A `swim` gene lets life **tunnel straight through** a
+  Valaar river to the far bank (Valaar is impassable to everyone else), paying
+  `valaar_drain` per cell crossed — purely Darwinian, the gene alone decides.
 
 Full design rationale lives in `docs/` and the idea notes; the engine constraints
 it satisfies are the ones that make genuine emergence possible (spatial
