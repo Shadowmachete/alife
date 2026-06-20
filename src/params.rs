@@ -35,11 +35,8 @@ pub struct EcoParams {
     pub drought_stress: f32,
     /// Energy a seeded/initial organism starts with.
     pub initial_energy: f32,
-    /// Extra energy drained per tick while standing on a Valaar cell.
+    /// Energy a tunneller spends per Valaar cell crossed when it swims through.
     pub valaar_drain: f32,
-    /// Consecutive non-swimming generations after which a lineage loses the
-    /// swimming ability (Lamarckian use-it-or-lose-it). `None` disables decay.
-    pub swim_disuse_limit: Option<u8>,
 }
 
 impl Default for EcoParams {
@@ -48,7 +45,7 @@ impl Default for EcoParams {
             base_energy: 4.0,
             size_energy: 8.0,
             basal_cost: 0.01,
-            size_cost: 0.05,
+            size_cost: 0.02,
             uptake_rate: 0.4,
             move_cost: 0.03,
             detritus_fraction: 0.8,
@@ -60,8 +57,7 @@ impl Default for EcoParams {
             heat_stress: 0.1,
             drought_stress: 0.1,
             initial_energy: 4.0,
-            valaar_drain: 0.1,
-            swim_disuse_limit: Some(2),
+            valaar_drain: 0.15,
         }
     }
 }
@@ -71,9 +67,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn swim_defaults_are_present() {
+    fn valaar_drain_default_is_present() {
         let eco = EcoParams::default();
-        assert_eq!(eco.swim_disuse_limit, Some(2));
-        assert!((eco.valaar_drain - 0.1).abs() < 1e-6);
+        assert!(eco.valaar_drain > 0.0);
     }
 }

@@ -11,7 +11,7 @@ use crate::organism::{Organism, TraitOrganism};
 use crate::params::EcoParams;
 use crate::population::Population;
 use crate::rng::Rng;
-use crate::space::Space;
+use crate::space::{Coord, Space};
 
 /// Autotrophy: each organism with an autotroph fraction `(1 - diet)` draws
 /// valaar from the cell it stands in, scaled by `valaar_efficiency`, capped by
@@ -66,12 +66,59 @@ pub fn cull_and_recycle<S: Space>(
     pop.retain(|o| o.is_alive(eco));
 }
 
+/// Step in direction `(dx, dy)` from `from` across a contiguous run of
+/// `swimmable` (Valaar) cells and return the first walkable land cell beyond the
+/// band together with the band width. `None` if the immediate neighbour isn't
+/// Valaar, the band runs off the map, or the far side isn't walkable land.
+fn tunnel_exit<S: Space>(
+    space: &S,
+    passable: Option<&[bool]>,
+    swimmable: Option<&[bool]>,
+    from: Coord,
+    dx: i32,
+    dy: i32,
+) -> Option<(Coord, u32)> {
+    let mut x = from.x as i64;
+    let mut y = from.y as i64;
+    let mut width = 0u32;
+    loop {
+        x += dx as i64;
+        y += dy as i64;
+        if x < 0 || y < 0 {
+            return None;
+        }
+        let c = Coord::new(x as u32, y as u32, from.layer);
+        if !space.in_bounds(c) {
+            return None;
+        }
+        let i = space.index(c);
+        let is_valaar = match swimmable {
+            Some(m) => m[i],
+            None => false,
+        };
+        if is_valaar {
+            width += 1;
+            continue;
+        }
+        // First non-Valaar cell beyond the band.
+        if width == 0 {
+            return None; // immediate neighbour wasn't Valaar -> not a crossing
+        }
+        let open = match passable {
+            Some(m) => m[i],
+            None => true,
+        };
+        return if open { Some((c, width)) } else { None };
+    }
+}
+
 /// Each organism moves with probability `speed` toward its richest in-bounds,
-/// **enterable** planar neighbour (gradient ascent on valaar). Moving costs
-/// `move_cost·speed`. A non-swimmer may enter a cell only where `passable`
-/// allows (`None` = no terrain constraint); a swimmer (`can_swim`) may also
-/// enter a `swimmable` cell (Valaar). Cells barred to all (ocean/mountain/rock)
-/// are false in both masks. Neighbours never cross layers.
+/// walkable planar neighbour (gradient ascent on valaar). Moving costs
+/// `move_cost·speed`. `passable`: `None` = no terrain constraint; otherwise a
+/// cell is walkable only where `passable[index]`. A **tunneller** (`can_swim`)
+/// may additionally *teleport straight through* a contiguous band of `swimmable`
+/// (Valaar) cells to the first walkable land cell on the far side, paying an
+/// extra `valaar_drain` per Valaar cell crossed. Neighbours never cross layers.
 pub fn move_organisms<S: Space>(
     space: &S,
     field: &Field,
@@ -86,54 +133,43 @@ pub fn move_organisms<S: Space>(
         if rng.next_unit() >= o.genome.speed {
             continue;
         }
-        let can_swim = o.can_swim(eco);
         let mut best = o.pos;
         let mut best_v = field.get(space.index(o.pos));
+        let mut best_width = 0u32; // Valaar cells crossed to reach `best` (0 = a walk)
+        // Walkable planar neighbours (ordinary gradient ascent).
         for n in space.planar_neighbors(o.pos) {
             let ni = space.index(n);
             let open = match passable {
                 Some(m) => m[ni],
                 None => true,
             };
-            let swim_ok = can_swim
-                && match swimmable {
-                    Some(m) => m[ni],
-                    None => false,
-                };
-            if !open && !swim_ok {
+            if !open {
                 continue; // impassable terrain blocks the step
             }
             let v = field.get(ni);
             if v > best_v {
                 best_v = v;
                 best = n;
+                best_width = 0;
+            }
+        }
+        // Tunnellers can teleport straight across a Valaar band to the far bank.
+        if o.can_swim() {
+            for (dx, dy) in [(1i32, 0i32), (-1, 0), (0, 1), (0, -1)] {
+                if let Some((exit, width)) = tunnel_exit(space, passable, swimmable, o.pos, dx, dy) {
+                    let v = field.get(space.index(exit));
+                    if v > best_v {
+                        best_v = v;
+                        best = exit;
+                        best_width = width;
+                    }
+                }
             }
         }
         if best != o.pos {
             o.pos = best;
             o.energy -= eco.move_cost * o.genome.speed;
-        }
-    }
-}
-
-/// Drain `eco.valaar_drain` from every organism standing on a swimmable
-/// (Valaar) cell, and mark it as having swum this life (`swam = true`). Only
-/// swimmers can legally be on such cells, so this is the running cost of
-/// swimming. `swimmable`: `None` = no Valaar anywhere (no-op).
-pub fn valaar_cost<S: Space>(
-    space: &S,
-    swimmable: Option<&[bool]>,
-    pop: &mut Population,
-    eco: &EcoParams,
-) {
-    let mask = match swimmable {
-        Some(m) => m,
-        None => return,
-    };
-    for o in pop.organisms_mut() {
-        if mask[space.index(o.pos)] {
-            o.swam = true;
-            o.energy -= eco.valaar_drain;
+            o.energy -= eco.valaar_drain * best_width as f32; // 0 for a plain walk
         }
     }
 }
@@ -201,11 +237,7 @@ pub fn reproduce(pop: &mut Population, eco: &EcoParams, rng: &mut Rng) {
             let child_energy = o.energy * eco.repro_cost_fraction;
             o.energy -= child_energy;
             let child_genome = o.genome.mutate(rng, eco.mutation_rate);
-            let mut child = TraitOrganism::new(child_genome, o.pos, child_energy);
-            // Lamarckian: reset disuse if the parent actually swam this life,
-            // otherwise carry it forward incremented.
-            child.swim_disuse = if o.swam { 0 } else { o.swim_disuse.saturating_add(1) };
-            children.push(child);
+            children.push(TraitOrganism::new(child_genome, o.pos, child_energy));
         }
     }
     for c in children {
@@ -430,18 +462,27 @@ mod tests {
         Genome::from_array([0.5, 1.0, 1.0, 0.0, 0.9, 0.5, 0.5, 0.5, swim])
     }
 
-    #[test]
-    fn swimmer_enters_richer_valaar_cell() {
-        let space = Grid2p5D::new(2, 1);
-        let eco = EcoParams::default();
+    /// land(0) - V(1) - V(2) - land(3): a 2-wide Valaar band with land on both
+    /// banks. `far` sets the far-bank field value. Returns the masks too.
+    fn river_row(far: f32) -> (Grid2p5D, crate::field::Field, Vec<bool>, Vec<bool>) {
+        let space = Grid2p5D::new(4, 1);
         let mut field = crate::field::Field::zeros(space.len());
-        field.set(space.index(Coord::new(0, 0, Layer::Surface)), 1.0);
-        field.set(space.index(Coord::new(1, 0, Layer::Surface)), 9.0); // richer
+        field.set(space.index(Coord::new(0, 0, Layer::Surface)), 1.0); // near bank
+        field.set(space.index(Coord::new(3, 0, Layer::Surface)), far); // far bank
         let mut passable = vec![true; space.len()];
         let mut swimmable = vec![false; space.len()];
-        let valaar = space.index(Coord::new(1, 0, Layer::Surface));
-        passable[valaar] = false; // impassable to walkers
-        swimmable[valaar] = true; // but it is Valaar
+        for x in 1..3u32 {
+            let i = space.index(Coord::new(x, 0, Layer::Surface));
+            passable[i] = false; // Valaar impassable to walkers
+            swimmable[i] = true;
+        }
+        (space, field, passable, swimmable)
+    }
+
+    #[test]
+    fn tunneller_teleports_across_band_to_far_bank() {
+        let (space, field, passable, swimmable) = river_row(9.0); // far bank richer
+        let eco = EcoParams::default();
         let start = Coord::new(0, 0, Layer::Surface);
         let mut pop = Population::new();
         pop.spawn(TraitOrganism::new(swimmer(0.9), start, 5.0));
@@ -449,89 +490,62 @@ mod tests {
         move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&passable), Some(&swimmable));
         assert_eq!(
             pop.organisms()[0].pos,
-            Coord::new(1, 0, Layer::Surface),
-            "a swimmer crosses into valaar"
+            Coord::new(3, 0, Layer::Surface),
+            "a tunneller crosses straight to the far bank, never onto Valaar"
+        );
+        let expected = 5.0 - eco.move_cost - eco.valaar_drain * 2.0;
+        assert!(
+            (pop.organisms()[0].energy - expected).abs() < 1e-6,
+            "pays move cost + valaar_drain per cell crossed"
         );
     }
 
     #[test]
-    fn non_swimmer_is_blocked_from_valaar() {
-        let space = Grid2p5D::new(2, 1);
+    fn non_tunneller_cannot_cross_the_band() {
+        let (space, field, passable, swimmable) = river_row(9.0);
         let eco = EcoParams::default();
-        let mut field = crate::field::Field::zeros(space.len());
-        field.set(space.index(Coord::new(0, 0, Layer::Surface)), 1.0);
-        field.set(space.index(Coord::new(1, 0, Layer::Surface)), 9.0);
-        let mut passable = vec![true; space.len()];
-        let mut swimmable = vec![false; space.len()];
-        let valaar = space.index(Coord::new(1, 0, Layer::Surface));
-        passable[valaar] = false;
-        swimmable[valaar] = true;
         let start = Coord::new(0, 0, Layer::Surface);
         let mut pop = Population::new();
         pop.spawn(TraitOrganism::new(swimmer(0.1), start, 5.0)); // gene below threshold
         let mut rng = Rng::new(1);
         move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&passable), Some(&swimmable));
-        assert_eq!(pop.organisms()[0].pos, start, "a non-swimmer cannot enter valaar");
+        assert_eq!(pop.organisms()[0].pos, start, "a non-tunneller is stuck on its bank");
     }
 
     #[test]
-    fn valaar_cell_drains_and_marks_swam() {
-        let space = Grid2p5D::new(2, 1);
+    fn tunneller_stays_if_far_bank_is_poorer() {
+        let (space, field, passable, swimmable) = river_row(0.5); // far bank poorer than near
         let eco = EcoParams::default();
+        let start = Coord::new(0, 0, Layer::Surface);
+        let mut pop = Population::new();
+        pop.spawn(TraitOrganism::new(swimmer(0.9), start, 5.0));
+        let mut rng = Rng::new(1);
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&passable), Some(&swimmable));
+        assert_eq!(pop.organisms()[0].pos, start, "no incentive to cross to a poorer bank");
+    }
+
+    #[test]
+    fn no_landing_beyond_band_blocks_the_crossing() {
+        // land(0) - V(1) - V(2) - ocean(3): the far side is a barrier, not land.
+        let space = Grid2p5D::new(4, 1);
+        let eco = EcoParams::default();
+        let mut field = crate::field::Field::zeros(space.len());
+        field.set(space.index(Coord::new(0, 0, Layer::Surface)), 1.0);
+        field.set(space.index(Coord::new(3, 0, Layer::Surface)), 99.0); // tempting but unreachable
+        let mut passable = vec![true; space.len()];
         let mut swimmable = vec![false; space.len()];
-        swimmable[space.index(Coord::new(1, 0, Layer::Surface))] = true;
+        for x in 1..3u32 {
+            let i = space.index(Coord::new(x, 0, Layer::Surface));
+            passable[i] = false;
+            swimmable[i] = true;
+        }
+        passable[space.index(Coord::new(3, 0, Layer::Surface))] = false; // ocean
+        let start = Coord::new(0, 0, Layer::Surface);
         let mut pop = Population::new();
-        pop.spawn(TraitOrganism::new(swimmer(0.9), Coord::new(1, 0, Layer::Surface), 5.0));
-        valaar_cost(&space, Some(&swimmable), &mut pop, &eco);
-        assert!((pop.organisms()[0].energy - (5.0 - eco.valaar_drain)).abs() < 1e-6);
-        assert!(pop.organisms()[0].swam, "standing on valaar counts as swimming");
-    }
-
-    #[test]
-    fn dry_land_is_free_and_not_swimming() {
-        let space = Grid2p5D::new(2, 1);
-        let eco = EcoParams::default();
-        let mut swimmable = vec![false; space.len()];
-        swimmable[space.index(Coord::new(1, 0, Layer::Surface))] = true;
-        let mut pop = Population::new();
-        pop.spawn(TraitOrganism::new(swimmer(0.9), Coord::new(0, 0, Layer::Surface), 5.0)); // on land
-        valaar_cost(&space, Some(&swimmable), &mut pop, &eco);
-        assert_eq!(pop.organisms()[0].energy, 5.0);
-        assert!(!pop.organisms()[0].swam);
-    }
-
-    #[test]
-    fn swimmer_parent_resets_child_disuse() {
-        let eco = EcoParams::default();
-        let c = Coord::new(1, 1, Layer::Surface);
-        let mut pop = Population::new();
-        // repro_threshold 0 => any energy reproduces; swim gene high.
-        let g = Genome::from_array([0.5, 1.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 0.9]);
-        let mut parent = TraitOrganism::new(g, c, 5.0);
-        parent.swam = true;
-        parent.swim_disuse = 1;
-        pop.spawn(parent);
-        let mut rng = Rng::new(3);
-        reproduce(&mut pop, &eco, &mut rng);
-        assert_eq!(pop.organisms()[1].swim_disuse, 0, "a swimming parent resets the counter");
-        assert!(!pop.organisms()[1].swam, "the child has not swum yet");
-    }
-
-    #[test]
-    fn idle_parent_increments_child_disuse_to_loss() {
-        let eco = EcoParams::default(); // limit Some(2)
-        let c = Coord::new(1, 1, Layer::Surface);
-        let mut pop = Population::new();
-        let g = Genome::from_array([0.5, 1.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 0.9]);
-        let mut parent = TraitOrganism::new(g, c, 5.0);
-        parent.swam = false;
-        parent.swim_disuse = 1;
-        pop.spawn(parent);
-        let mut rng = Rng::new(3);
-        reproduce(&mut pop, &eco, &mut rng);
-        let child = &pop.organisms()[1];
-        assert_eq!(child.swim_disuse, 2);
-        assert!(!child.can_swim(&eco), "two idle generations lose the ability");
+        pop.spawn(TraitOrganism::new(swimmer(0.9), start, 5.0));
+        let mut rng = Rng::new(1);
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&passable), Some(&swimmable));
+        assert_eq!(pop.organisms()[0].pos, start, "cannot tunnel into a non-land far side");
     }
 
     // [size, eff, speed, diet, repro_threshold, lifespan, heat_tol, drought_tol]

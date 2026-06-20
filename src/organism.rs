@@ -61,30 +61,17 @@ pub struct TraitOrganism {
     /// Stored valaar. This *is* the energy currency.
     pub energy: f32,
     pub age: u32,
-    /// Set true the first time this individual occupies a Valaar cell (drives the
-    /// Lamarckian disuse channel; persists for the rest of its life).
-    pub swam: bool,
-    /// Generations its lineage has gone without swimming (inherited at birth).
-    pub swim_disuse: u8,
 }
 
 impl TraitOrganism {
     pub fn new(genome: Genome, pos: Coord, energy: f32) -> Self {
-        TraitOrganism { genome, pos, energy, age: 0, swam: false, swim_disuse: 0 }
+        TraitOrganism { genome, pos, energy, age: 0 }
     }
 
-    /// Whether this organism may currently enter Valaar. Genetically able when
-    /// `genome.swim > SWIM_THRESHOLD`; if `eco.swim_disuse_limit` is `Some(lim)`,
-    /// the ability is further suppressed once the lineage has gone `lim`
-    /// generations without swimming.
-    pub fn can_swim(&self, eco: &EcoParams) -> bool {
-        if self.genome.swim <= SWIM_THRESHOLD {
-            return false;
-        }
-        match eco.swim_disuse_limit {
-            Some(lim) => self.swim_disuse < lim,
-            None => true,
-        }
+    /// Whether this organism can tunnel through Valaar. Purely genetic
+    /// (Darwinian): able iff `genome.swim > SWIM_THRESHOLD`.
+    pub fn can_swim(&self) -> bool {
+        self.genome.swim > SWIM_THRESHOLD
     }
 }
 
@@ -191,36 +178,9 @@ mod tests {
     }
 
     #[test]
-    fn new_organism_has_not_swum() {
-        let o = TraitOrganism::new(swim_genome(0.9), Coord::new(0, 0, Layer::Surface), 1.0);
-        assert!(!o.swam);
-        assert_eq!(o.swim_disuse, 0);
-    }
-
-    #[test]
     fn can_swim_requires_gene_above_threshold() {
-        let eco = EcoParams::default();
         let pos = Coord::new(0, 0, Layer::Surface);
-        assert!(TraitOrganism::new(swim_genome(0.9), pos, 1.0).can_swim(&eco));
-        assert!(!TraitOrganism::new(swim_genome(0.4), pos, 1.0).can_swim(&eco));
-    }
-
-    #[test]
-    fn disuse_suppresses_swimming_at_the_limit() {
-        let eco = EcoParams::default(); // swim_disuse_limit = Some(2)
-        let pos = Coord::new(0, 0, Layer::Surface);
-        let mut o = TraitOrganism::new(swim_genome(0.9), pos, 1.0);
-        o.swim_disuse = 1;
-        assert!(o.can_swim(&eco), "one idle generation still swims");
-        o.swim_disuse = 2;
-        assert!(!o.can_swim(&eco), "two idle generations lose it");
-    }
-
-    #[test]
-    fn disuse_is_ignored_when_limit_is_none() {
-        let eco = EcoParams { swim_disuse_limit: None, ..EcoParams::default() };
-        let mut o = TraitOrganism::new(swim_genome(0.9), Coord::new(0, 0, Layer::Surface), 1.0);
-        o.swim_disuse = 200;
-        assert!(o.can_swim(&eco), "decay off -> gene alone decides");
+        assert!(TraitOrganism::new(swim_genome(0.9), pos, 1.0).can_swim());
+        assert!(!TraitOrganism::new(swim_genome(0.4), pos, 1.0).can_swim());
     }
 }
