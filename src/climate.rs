@@ -33,12 +33,36 @@ impl Default for Climate {
         // Order: Rasgun, Goscon, Miscre, Vraze, Dansch, Laisp.
         Climate {
             targets: [
-                SeasonTarget { heat: 0.30, water: 0.60, valaar_mult: 1.5 }, // Rasgun: surge, spring
-                SeasonTarget { heat: 0.50, water: 0.60, valaar_mult: 1.2 }, // Goscon: stable, peak
-                SeasonTarget { heat: 0.40, water: 0.90, valaar_mult: 1.0 }, // Miscre: monsoon, fog
-                SeasonTarget { heat: 0.60, water: 0.40, valaar_mult: 0.9 }, // Vraze: quakes, crystalline
-                SeasonTarget { heat: 0.80, water: 0.15, valaar_mult: 0.6 }, // Dansch: drought, hot
-                SeasonTarget { heat: 0.60, water: 0.30, valaar_mult: 0.4 }, // Laisp: lowest valaar
+                SeasonTarget {
+                    heat: 0.30,
+                    water: 0.60,
+                    valaar_mult: 1.5,
+                }, // Rasgun: surge, spring
+                SeasonTarget {
+                    heat: 0.50,
+                    water: 0.60,
+                    valaar_mult: 1.2,
+                }, // Goscon: stable, peak
+                SeasonTarget {
+                    heat: 0.20,
+                    water: 0.90,
+                    valaar_mult: 1.0,
+                }, // Miscre: monsoon, fog
+                SeasonTarget {
+                    heat: 0.60,
+                    water: 0.40,
+                    valaar_mult: 0.9,
+                }, // Vraze: quakes, crystalline
+                SeasonTarget {
+                    heat: 0.80,
+                    water: 0.15,
+                    valaar_mult: 0.6,
+                }, // Dansch: drought, hot
+                SeasonTarget {
+                    heat: 0.60,
+                    water: 0.30,
+                    valaar_mult: 0.4,
+                }, // Laisp: lowest valaar
             ],
             relax_rate: 0.05,
         }
@@ -76,7 +100,10 @@ mod tests {
         let c = Climate::default();
         let dansch = target(&c, Season::Dansch);
         let miscre = target(&c, Season::Miscre);
-        assert!(dansch.water < miscre.water, "Dansch should be drier than Miscre");
+        assert!(
+            dansch.water < miscre.water,
+            "Dansch should be drier than Miscre"
+        );
         assert!(dansch.water < 0.3, "Dansch is a drought");
         assert!(miscre.water > 0.7, "Miscre is a monsoon");
     }

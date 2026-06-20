@@ -13,8 +13,6 @@ use serde::{Deserialize, Serialize};
 pub enum CellType {
     Ocean,
     Land,
-    /// The world's energy substance — both flowing rivers and the standing
-    /// Rasconne reservoir. (Formerly the separate `River` and `Rasconne` types.)
     Valaar,
     Rock,
     Mountain,
@@ -44,7 +42,10 @@ impl CellType {
 
     /// Whether an organism may move into this cell (plan 5 consumes this).
     pub fn passable(self) -> bool {
-        !matches!(self, CellType::Ocean | CellType::Mountain | CellType::Valaar)
+        !matches!(
+            self,
+            CellType::Ocean | CellType::Mountain | CellType::Valaar
+        )
     }
 
     /// One-char code for compact text / debugging.
@@ -101,7 +102,13 @@ impl TerrainMap {
     pub fn filled(len: usize, width: u32, height: u32, fill: CellType, seed: u64) -> Self {
         let plane = width as usize * height as usize;
         let layers = if plane == 0 { 0 } else { (len / plane) as u32 };
-        TerrainMap { width, height, layers, seed, cells: vec![fill; len] }
+        TerrainMap {
+            width,
+            height,
+            layers,
+            seed,
+            cells: vec![fill; len],
+        }
     }
 
     pub fn width(&self) -> u32 {
@@ -138,8 +145,8 @@ use std::path::Path;
 
 /// Write `map` as JSON (`{w, h, layers, seed, cells:[...]}`).
 pub fn save_json(map: &TerrainMap, path: &Path) -> io::Result<()> {
-    let json = serde_json::to_string(map)
-        .map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
+    let json =
+        serde_json::to_string(map).map_err(|e| io::Error::new(io::ErrorKind::InvalidData, e))?;
     std::fs::write(path, json)
 }
 
@@ -208,15 +215,24 @@ mod tests {
         let c = Coord::new(2, 1, Layer::Surface);
         map.set(space.index(c), CellType::Valaar);
         assert_eq!(map.get(space.index(c)), CellType::Valaar);
-        assert_eq!(map.get(space.index(Coord::new(0, 0, Layer::Underground))), CellType::Ocean);
+        assert_eq!(
+            map.get(space.index(Coord::new(0, 0, Layer::Underground))),
+            CellType::Ocean
+        );
     }
 
     #[test]
     fn json_round_trips_through_a_file() {
         let space = Grid2p5D::new(5, 4);
         let mut map = TerrainMap::filled(space.len(), 5, 4, CellType::Land, 0xABCD);
-        map.set(space.index(Coord::new(2, 2, Layer::Surface)), CellType::Valaar);
-        map.set(space.index(Coord::new(0, 0, Layer::Surface)), CellType::Ocean);
+        map.set(
+            space.index(Coord::new(2, 2, Layer::Surface)),
+            CellType::Valaar,
+        );
+        map.set(
+            space.index(Coord::new(0, 0, Layer::Surface)),
+            CellType::Ocean,
+        );
 
         let path = std::env::temp_dir().join("alife_terrain_roundtrip.json");
         save_json(&map, &path).unwrap();

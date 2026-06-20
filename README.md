@@ -134,5 +134,5 @@ docs/
 
 ## License
 
-This project is released into the **public domain** under
-[The Unlicense](LICENSE) — do anything you like with it, no attribution required.
+Released under the [MIT License](LICENSE) — do what you like with it; keep the
+copyright and licence notice in copies.
