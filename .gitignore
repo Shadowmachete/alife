@@ -1,4 +1,5 @@
 /target
 /out
+/dist
 /tools/__pycache__
 prompts.md
