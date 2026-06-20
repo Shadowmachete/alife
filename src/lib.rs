@@ -15,3 +15,4 @@ pub mod terrain;
 pub mod viewer;
 pub mod tilemap;
 pub mod mapsim;
+pub mod bridges;
