@@ -8,6 +8,9 @@ The guiding principle: **the world's physics *are* the selection pressure.**
 Nothing scores fitness — who survives is decided by traits versus world. Life
 genuinely evolves, and the natural history that falls out is the payoff.
 
+**Live demo:** [shadowmachete.github.io/alife](https://shadowmachete.github.io/alife/) —
+the `mapview` viewer compiled to WASM (drag to pan, scroll to zoom).
+
 ## The world — Alchaea
 
 A prehistoric, alien world born from the hyper-eruption of the supervolcano
@@ -100,6 +103,15 @@ python3 tools/png_to_rgba.py     # bake assets/sheet.png -> assets/sheet.rgba (a
 #                diet split, mean size, per-continent counts, and Pause/Reseed.
 #   .json arg -> TerrainMap in solid CellType colours (layer toggle in the panel)
 cargo run --bin mapview [map.tmx | map.json]
+```
+
+Build the web demo locally (needs [`trunk`](https://trunkrs.dev) + the
+`wasm32-unknown-unknown` target). On wasm the default map + atlas are embedded in
+the binary, so no files are read at runtime:
+
+```sh
+trunk serve --release                          # http://localhost:8080
+trunk build --release --public-url /alife/     # -> dist/ (what CI deploys to Pages)
 ```
 
 ## Layout
