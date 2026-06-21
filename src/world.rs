@@ -11,6 +11,9 @@ pub struct Params {
     pub source_rate: f32,
     /// Planar diffusion coefficient. Keep `< 0.25` for stability.
     pub diffuse_rate: f32,
+    /// Planar diffusion passes per tick (0 = locked). More stable passes spread
+    /// valaar further without raising the per-pass coefficient past its limit.
+    pub diffuse_passes: u32,
     /// Surface<->underground exchange fraction at access points.
     pub layer_exchange: f32,
     /// Fraction of valaar lost per step, in `0.0..=1.0`.
@@ -22,6 +25,7 @@ impl Default for Params {
         Params {
             source_rate: 1.0,
             diffuse_rate: 0.2,
+            diffuse_passes: 1,
             layer_exchange: 0.1,
             decay: 0.01,
         }
@@ -119,7 +123,9 @@ impl<S: Space> World<S> {
     pub fn step(&mut self) {
         use crate::valaar;
         valaar::inject_sources(&self.space, &mut self.valaar, &self.sources, self.params.source_rate);
-        valaar::diffuse_planar(&self.space, &mut self.valaar, self.params.diffuse_rate);
+        for _ in 0..self.params.diffuse_passes {
+            valaar::diffuse_planar(&self.space, &mut self.valaar, self.params.diffuse_rate);
+        }
         valaar::exchange_layers(
             &self.space,
             &mut self.valaar,
@@ -151,6 +157,27 @@ mod tests {
         let world = World::new(space, Params::default());
         assert_eq!(world.crystal.len(), world.space.len());
         assert_eq!(world.crystal.total(), 0.0);
+    }
+
+    #[test]
+    fn diffuse_passes_controls_spread() {
+        // One hot centre cell on a 1-D strip, isolated from sources/decay/exchange.
+        let remaining = |passes: u32| {
+            let p = Params {
+                diffuse_passes: passes,
+                source_rate: 0.0,
+                decay: 0.0,
+                ..Default::default()
+            };
+            let mut w = World::new(Grid2p5D::new(5, 1), p);
+            let c = w.space.index(Coord::new(2, 0, Layer::Surface));
+            w.valaar.set(c, 1.0);
+            w.step();
+            w.valaar.get(c)
+        };
+        assert_eq!(remaining(0), 1.0, "no passes: nothing leaves the centre");
+        assert!(remaining(1) < remaining(0), "one pass spreads some out");
+        assert!(remaining(3) < remaining(1), "more passes spread more out");
     }
 
     #[test]
