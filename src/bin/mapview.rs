@@ -7,7 +7,9 @@
 use alife::mapsim::{
     compute_stats, downscale, label_continents, marker_color, seed_on_fed_land, world_from_materials,
 };
+use alife::bridges::{find_bridge_sites, BridgeConfig, Bridges};
 use alife::params::EcoParams;
+use alife::rng::Rng;
 use alife::sim::Sim;
 use alife::space::{Grid2p5D, Layer, Space};
 use alife::terrain::{CellType, TerrainMap};
@@ -70,6 +72,9 @@ fn build_tile_scene(xml: &str, atlas_bytes: &[u8]) -> Scene {
     let (continents, n_continents) = label_continents(&sim_mats, sw, sh);
     let world = world_from_materials(sw, sh, &sim_mats);
     let mut sim = Sim::new(world, EcoParams::default(), 0xA11FE);
+    let bcfg = BridgeConfig::default();
+    let sites = find_bridge_sites(&sim_mats, sw, sh, &continents, &mut Rng::new(0xB12D6E), &bcfg);
+    sim.set_bridges(Bridges::new(sites, bcfg, 0xB12D6E));
     for _ in 0..WARM_STEPS {
         sim.world.step();
     }

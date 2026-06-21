@@ -2,6 +2,7 @@
 //! in a fixed order. It owns the single `Rng` so the whole simulation is
 //! reproducible from `(seed, params, seeds)`.
 
+use crate::bridges::Bridges;
 use crate::climate::{self, Climate};
 use crate::ecology;
 use crate::field::Field;
@@ -22,6 +23,8 @@ pub struct Sim<S: Space> {
     pub water: Field,
     pub calendar: Calendar,
     pub climate: Climate,
+    /// Optional dynamic land bridges (terrain path only; `None` headless).
+    bridges: Option<Bridges>,
     /// Un-multiplied Rasconne source rate, captured at construction so the
     /// per-season multiplier always scales the same base.
     base_source: f32,
@@ -46,6 +49,7 @@ impl<S: Space> Sim<S> {
             water: Field::zeros(len),
             calendar: Calendar::new(),
             climate,
+            bridges: None,
             base_source,
         }
     }
@@ -65,6 +69,11 @@ impl<S: Space> Sim<S> {
         self.pop.spawn(o);
     }
 
+    /// Attach dynamic land bridges (call once, after construction).
+    pub fn set_bridges(&mut self, bridges: Bridges) {
+        self.bridges = Some(bridges);
+    }
+
     /// Advance one tick: calendar → season-coupled valaar → substrate → climate
     /// → ecology loop (with environmental stress before metabolism).
     pub fn step(&mut self) {
@@ -77,6 +86,18 @@ impl<S: Space> Sim<S> {
 
         self.world.step();
         climate::apply_climate(&mut self.heat, &mut self.water, season, &self.climate);
+
+        // Dynamic land bridges: open/close cells, drown anyone on a sunk cell.
+        if let Some(bridges) = self.bridges.as_mut() {
+            let upd = bridges.update(&self.calendar);
+            for &i in &upd.opened {
+                self.world.set_cell_passable(i, true);
+            }
+            for &i in &upd.closed {
+                self.world.set_cell_passable(i, false);
+            }
+            ecology::drown(&self.world.space, &mut self.pop, &upd.closed);
+        }
 
         ecology::absorb(&self.world.space, &mut self.world.valaar, &mut self.pop, &self.eco);
         ecology::move_organisms(
