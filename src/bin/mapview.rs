@@ -158,7 +158,7 @@ fn build_tile_scene(xml: &str, atlas_bytes: &[u8]) -> Scene {
         tunables,
         history: History::new(HISTORY_CAP),
         show_charts: false,
-        show_valaar: false,
+        show_valaar: true,
         show_total: true,
         continent_visible: vec![true; n_continents as usize],
     };

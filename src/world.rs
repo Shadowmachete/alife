@@ -24,7 +24,7 @@ impl Default for Params {
     fn default() -> Self {
         Params {
             source_rate: 1.0,
-            diffuse_rate: 0.2,
+            diffuse_rate: 0.24,
             diffuse_passes: 1,
             layer_exchange: 0.1,
             decay: 0.01,
