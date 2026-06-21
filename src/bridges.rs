@@ -27,7 +27,7 @@ pub struct BridgeConfig {
 impl Default for BridgeConfig {
     fn default() -> Self {
         BridgeConfig {
-            max_gap: 15,
+            max_gap: 20,
             min_width: 3,
             max_width: 6,
             site_fraction: 0.5,
