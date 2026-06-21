@@ -247,17 +247,26 @@ pub fn mutation_rate(eco: &EcoParams, local_valaar: f32, season: Season) -> f32 
 }
 
 /// Asexual reproduction: any organism at or above its energy threshold spawns
-/// one child in its own cell. The child takes `repro_cost_fraction` of the
-/// parent's energy and a mutated copy of its genome. Children are collected
-/// first, then appended, so iteration order (and determinism) is stable.
-pub fn reproduce(pop: &mut Population, eco: &EcoParams, rng: &mut Rng) {
+/// one child in its own cell, taking `repro_cost_fraction` of the parent's
+/// energy and a mutated copy of its genome. The mutation magnitude is the
+/// **mutation field** at the parent's cell (`mutation_rate`). Children are
+/// collected first, then appended, so iteration order (determinism) is stable.
+pub fn reproduce<S: Space>(
+    space: &S,
+    valaar: &Field,
+    pop: &mut Population,
+    eco: &EcoParams,
+    rng: &mut Rng,
+    season: Season,
+) {
     let mut children: Vec<TraitOrganism> = Vec::new();
     for o in pop.organisms_mut() {
         let threshold = o.genome.repro_threshold * o.max_energy(eco);
         if o.energy >= threshold && o.energy > 0.0 {
             let child_energy = o.energy * eco.repro_cost_fraction;
             o.energy -= child_energy;
-            let child_genome = o.genome.mutate(rng, eco.mutation_rate);
+            let rate = mutation_rate(eco, valaar.get(space.index(o.pos)), season);
+            let child_genome = o.genome.mutate(rng, rate);
             children.push(TraitOrganism::new(child_genome, o.pos, child_energy));
         }
     }
@@ -628,7 +637,9 @@ mod tests {
         let parent = TraitOrganism::new(g, c, 5.0);
         pop.spawn(parent);
         let mut rng = Rng::new(3);
-        reproduce(&mut pop, &eco, &mut rng);
+        let space = Grid2p5D::new(2, 2);
+        let valaar = crate::field::Field::zeros(space.len());
+        reproduce(&space, &valaar, &mut pop, &eco, &mut rng, Season::Goscon);
         assert_eq!(pop.len(), 2);
         let child = &pop.organisms()[1];
         assert_eq!(child.pos, c);
@@ -646,8 +657,36 @@ mod tests {
         let g = Genome::from_array([0.5, 1.0, 0.0, 0.0, 1.0, 0.5, 0.5, 0.5, 0.5]);
         pop.spawn(TraitOrganism::new(g, c, 0.1));
         let mut rng = Rng::new(3);
-        reproduce(&mut pop, &eco, &mut rng);
+        let space = Grid2p5D::new(2, 2);
+        let valaar = crate::field::Field::zeros(space.len());
+        reproduce(&space, &valaar, &mut pop, &eco, &mut rng, Season::Goscon);
         assert_eq!(pop.len(), 1);
+    }
+
+    #[test]
+    fn reproduce_mutates_more_where_valaar_is_high() {
+        let space = Grid2p5D::new(2, 1);
+        let eco = EcoParams::default();
+        let dusk = Coord::new(0, 0, Layer::Surface); // valaar 0
+        let core = Coord::new(1, 0, Layer::Surface);
+        let mut valaar = crate::field::Field::zeros(space.len());
+        valaar.set(space.index(core), eco.mutation_ref * 4.0); // saturate to ceil
+        // repro_threshold 0 so any energy reproduces.
+        let g = Genome::from_array([0.5, 1.0, 0.0, 0.5, 0.0, 0.5, 0.5, 0.5, 0.5]);
+        let child_genome = |pos| {
+            let mut pop = Population::new();
+            pop.spawn(TraitOrganism::new(g, pos, 5.0));
+            let mut rng = Rng::new(7);
+            reproduce(&space, &valaar, &mut pop, &eco, &mut rng, Season::Goscon);
+            pop.organisms()[1].genome
+        };
+        let delta = |gc: Genome| -> f32 {
+            gc.to_array().iter().zip(g.to_array()).map(|(a, b)| (a - b).abs()).sum()
+        };
+        assert!(
+            delta(child_genome(core)) > delta(child_genome(dusk)),
+            "the core mutates further than the dusk on the same rng draws"
+        );
     }
 
     #[test]
