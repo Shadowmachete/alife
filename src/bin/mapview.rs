@@ -25,6 +25,8 @@ use std::path::Path;
 const SIM_SCALE: u32 = 3; // sim grid is the display grid downscaled by this
 const SEED_COUNT: usize = 1500;
 const WARM_STEPS: usize = 150; // spread valaar before seeding life
+const SIM_SEED: u64 = 0xA11FE;
+const BRIDGE_SEED: u64 = 0xB12D6E;
 
 /// The editable working copy behind the Parameters panel.
 #[derive(Clone)]
@@ -73,6 +75,15 @@ impl TileSim {
         self.sim.pop = alife::population::Population::new();
         seed_on_fed_land(&mut self.sim, &self.mats, SEED_COUNT, 1e-3);
     }
+
+    /// Fresh A/B run: rebuild the world + bridges + sim from the current
+    /// tunables on the same map, re-warm valaar, and re-seed life.
+    fn rebuild(&mut self) {
+        let sw = self.sim.world.space.width();
+        let sh = self.sim.world.space.height();
+        self.sim = build_sim(&self.mats, sw, sh, &self.continents, &self.tunables);
+        self.reseed();
+    }
 }
 
 // On wasm only `Tiles` is constructed (the .json `TerrainMap` scene is native).
@@ -91,6 +102,27 @@ impl Scene {
     }
 }
 
+/// Build a warmed `Sim` (world + bridges) for a tile scene from the downscaled
+/// materials and the current tunables. Shared by first load and Reload.
+fn build_sim(
+    mats: &[CellType],
+    sw: u32,
+    sh: u32,
+    continents: &[Option<u32>],
+    tun: &Tunables,
+) -> Sim<Grid2p5D> {
+    let mut world = world_from_materials(sw, sh, mats);
+    world.params.diffuse_rate = tun.diffuse_rate;
+    world.params.decay = tun.decay;
+    let mut sim = Sim::new(world, tun.eco, SIM_SEED);
+    let sites = find_bridge_sites(mats, sw, sh, continents, &mut Rng::new(BRIDGE_SEED), &tun.bridges);
+    sim.set_bridges(Bridges::new(sites, tun.bridges, BRIDGE_SEED));
+    for _ in 0..WARM_STEPS {
+        sim.world.step();
+    }
+    sim
+}
+
 /// Build a live `Scene::Tiles` from an in-memory `.tmx` string and `.rgba` atlas
 /// bytes. Shared by the native (file-backed) and wasm (embedded) loaders so the
 /// scene-construction logic lives in one place.
@@ -101,14 +133,8 @@ fn build_tile_scene(xml: &str, atlas_bytes: &[u8]) -> Scene {
     let mats = material_grid(&map, &atlas);
     let (sw, sh, sim_mats) = downscale(&mats, map.width, map.height, SIM_SCALE);
     let (continents, n_continents) = label_continents(&sim_mats, sw, sh);
-    let world = world_from_materials(sw, sh, &sim_mats);
-    let mut sim = Sim::new(world, EcoParams::default(), 0xA11FE);
-    let bcfg = BridgeConfig::default();
-    let sites = find_bridge_sites(&sim_mats, sw, sh, &continents, &mut Rng::new(0xB12D6E), &bcfg);
-    sim.set_bridges(Bridges::new(sites, bcfg, 0xB12D6E));
-    for _ in 0..WARM_STEPS {
-        sim.world.step();
-    }
+    let tunables = Tunables::default();
+    let sim = build_sim(&sim_mats, sw, sh, &continents, &tunables);
     let mut t = TileSim {
         map,
         atlas,
@@ -117,7 +143,7 @@ fn build_tile_scene(xml: &str, atlas_bytes: &[u8]) -> Scene {
         continents,
         n_continents,
         running: true,
-        tunables: Tunables::default(),
+        tunables,
     };
     t.reseed();
     Scene::Tiles(Box::new(t))
@@ -329,8 +355,11 @@ impl eframe::App for MapApp {
                         }
                     });
                     ui.separator();
-                    let _reload = parameters_ui(ui, &mut t.tunables);
+                    let reload = parameters_ui(ui, &mut t.tunables);
                     t.sim.eco = t.tunables.eco; // ecology applies live
+                    if reload {
+                        t.rebuild();
+                    }
                 }
                 Scene::Terrain { layer, .. } => {
                     ui.label(format!("layer: {layer:?}"));
