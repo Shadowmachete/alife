@@ -235,37 +235,26 @@ pub fn drown<S: Space>(space: &S, pop: &mut Population, drowned: &[usize]) {
     pop.retain(|o| !drowned.contains(&space.index(o.pos)));
 }
 
-/// Per-organism mutation magnitude at birth: the base `mutation_rate` scaled by
-/// local valaar (Dusk -> `mutation_floor_mult`, Rasconne core -> `mutation_ceil_mult`,
-/// linear between, normalised against `mutation_ref`) and multiplied by
-/// `rasgun_mutation_mult` during Rasgun.
-pub fn mutation_rate(eco: &EcoParams, local_valaar: f32, season: Season) -> f32 {
-    let t = (local_valaar / eco.mutation_ref).clamp(0.0, 1.0);
-    let valaar_mult = eco.mutation_floor_mult + (eco.mutation_ceil_mult - eco.mutation_floor_mult) * t;
+/// Per-organism mutation magnitude at birth: the base `mutation_rate`, multiplied
+/// by `rasgun_mutation_mult` during the Rasgun surge and left flat otherwise.
+pub fn mutation_rate(eco: &EcoParams, season: Season) -> f32 {
     let season_mult = if season == Season::Rasgun { eco.rasgun_mutation_mult } else { 1.0 };
-    eco.mutation_rate * valaar_mult * season_mult
+    eco.mutation_rate * season_mult
 }
 
 /// Asexual reproduction: any organism at or above its energy threshold spawns
 /// one child in its own cell, taking `repro_cost_fraction` of the parent's
-/// energy and a mutated copy of its genome. The mutation magnitude is the
-/// **mutation field** at the parent's cell (`mutation_rate`). Children are
-/// collected first, then appended, so iteration order (determinism) is stable.
-pub fn reproduce<S: Space>(
-    space: &S,
-    valaar: &Field,
-    pop: &mut Population,
-    eco: &EcoParams,
-    rng: &mut Rng,
-    season: Season,
-) {
+/// energy and a mutated copy of its genome. The mutation magnitude spikes during
+/// Rasgun (`mutation_rate`). Children are collected first, then appended, so
+/// iteration order (determinism) is stable.
+pub fn reproduce(pop: &mut Population, eco: &EcoParams, rng: &mut Rng, season: Season) {
     let mut children: Vec<TraitOrganism> = Vec::new();
     for o in pop.organisms_mut() {
         let threshold = o.genome.repro_threshold * o.max_energy(eco);
         if o.energy >= threshold && o.energy > 0.0 {
             let child_energy = o.energy * eco.repro_cost_fraction;
             o.energy -= child_energy;
-            let rate = mutation_rate(eco, valaar.get(space.index(o.pos)), season);
+            let rate = mutation_rate(eco, season);
             let child_genome = o.genome.mutate(rng, rate);
             children.push(TraitOrganism::new(child_genome, o.pos, child_energy));
         }
@@ -637,9 +626,7 @@ mod tests {
         let parent = TraitOrganism::new(g, c, 5.0);
         pop.spawn(parent);
         let mut rng = Rng::new(3);
-        let space = Grid2p5D::new(2, 2);
-        let valaar = crate::field::Field::zeros(space.len());
-        reproduce(&space, &valaar, &mut pop, &eco, &mut rng, Season::Goscon);
+        reproduce(&mut pop, &eco, &mut rng, Season::Goscon);
         assert_eq!(pop.len(), 2);
         let child = &pop.organisms()[1];
         assert_eq!(child.pos, c);
@@ -657,54 +644,17 @@ mod tests {
         let g = Genome::from_array([0.5, 1.0, 0.0, 0.0, 1.0, 0.5, 0.5, 0.5, 0.5]);
         pop.spawn(TraitOrganism::new(g, c, 0.1));
         let mut rng = Rng::new(3);
-        let space = Grid2p5D::new(2, 2);
-        let valaar = crate::field::Field::zeros(space.len());
-        reproduce(&space, &valaar, &mut pop, &eco, &mut rng, Season::Goscon);
+        reproduce(&mut pop, &eco, &mut rng, Season::Goscon);
         assert_eq!(pop.len(), 1);
-    }
-
-    #[test]
-    fn reproduce_mutates_more_where_valaar_is_high() {
-        let space = Grid2p5D::new(2, 1);
-        let eco = EcoParams::default();
-        let dusk = Coord::new(0, 0, Layer::Surface); // valaar 0
-        let core = Coord::new(1, 0, Layer::Surface);
-        let mut valaar = crate::field::Field::zeros(space.len());
-        valaar.set(space.index(core), eco.mutation_ref * 4.0); // saturate to ceil
-        // repro_threshold 0 so any energy reproduces.
-        let g = Genome::from_array([0.5, 1.0, 0.0, 0.5, 0.0, 0.5, 0.5, 0.5, 0.5]);
-        let child_genome = |pos| {
-            let mut pop = Population::new();
-            pop.spawn(TraitOrganism::new(g, pos, 5.0));
-            let mut rng = Rng::new(7);
-            reproduce(&space, &valaar, &mut pop, &eco, &mut rng, Season::Goscon);
-            pop.organisms()[1].genome
-        };
-        let delta = |gc: Genome| -> f32 {
-            gc.to_array().iter().zip(g.to_array()).map(|(a, b)| (a - b).abs()).sum()
-        };
-        assert!(
-            delta(child_genome(core)) > delta(child_genome(dusk)),
-            "the core mutates further than the dusk on the same rng draws"
-        );
-    }
-
-    #[test]
-    fn mutation_rate_floors_in_the_dusk_and_peaks_in_the_core() {
-        let eco = EcoParams::default();
-        let dusk = mutation_rate(&eco, 0.0, Season::Goscon);
-        let core = mutation_rate(&eco, eco.mutation_ref, Season::Goscon);
-        assert!((dusk - eco.mutation_rate * eco.mutation_floor_mult).abs() < 1e-6);
-        assert!((core - eco.mutation_rate * eco.mutation_ceil_mult).abs() < 1e-6);
-        assert!(core > dusk);
     }
 
     #[test]
     fn rasgun_amplifies_mutation() {
         let eco = EcoParams::default();
-        let normal = mutation_rate(&eco, eco.mutation_ref, Season::Goscon);
-        let rasgun = mutation_rate(&eco, eco.mutation_ref, Season::Rasgun);
-        assert!((rasgun - normal * eco.rasgun_mutation_mult).abs() < 1e-5);
+        let normal = mutation_rate(&eco, Season::Goscon);
+        let rasgun = mutation_rate(&eco, Season::Rasgun);
+        assert!((normal - eco.mutation_rate).abs() < 1e-6, "off-season is the flat base rate");
+        assert!((rasgun - eco.mutation_rate * eco.rasgun_mutation_mult).abs() < 1e-5);
     }
 
     #[test]

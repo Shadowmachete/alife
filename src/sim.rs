@@ -113,13 +113,6 @@ impl<S: Space> Sim<S> {
         ecology::environmental_stress(&self.world.space, &self.heat, &self.water, &mut self.pop, &self.eco);
         ecology::metabolize(&mut self.pop, &self.eco);
         ecology::cull_and_recycle(&self.world.space, &mut self.world.valaar, &mut self.pop, &self.eco);
-        ecology::reproduce(
-            &self.world.space,
-            &self.world.valaar,
-            &mut self.pop,
-            &self.eco,
-            &mut self.rng,
-            season,
-        );
+        ecology::reproduce(&mut self.pop, &self.eco, &mut self.rng, season);
     }
 }
