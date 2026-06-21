@@ -7,6 +7,7 @@
 
 use crate::space::{Coord, Layer, Space};
 use crate::terrain::TerrainMap;
+use crate::valaar::ValaarPhase;
 
 /// Base pixels-per-cell at zoom 1.0 (a 16×16 block per cell). [A9]
 pub const CELL_PX: f32 = 16.0;
@@ -62,6 +63,35 @@ fn pack(rgb: [u8; 3]) -> u32 {
     ((rgb[0] as u32) << 16) | ((rgb[1] as u32) << 8) | rgb[2] as u32
 }
 
+/// Maximum overlay opacity (0..=255), reached at a cell holding the layer's peak
+/// valaar. [V3]
+pub const OVERLAY_MAX_ALPHA: u8 = 200;
+
+/// Tint for the frozen `crystal` store — an icy white-blue, distinct from every
+/// phase hue. Drawn where a cell's crystal outweighs its liquid valaar. [V2]
+pub const CRYSTAL_RGB: [u8; 3] = [180, 220, 255];
+
+/// The hue the valaar overlay paints for each phase; opacity carries amount. [V1]
+pub fn phase_rgb(phase: ValaarPhase) -> [u8; 3] {
+    match phase {
+        ValaarPhase::Liquid => [235, 90, 60],
+        ValaarPhase::Gaseous => [150, 210, 230],
+        ValaarPhase::Crystalline => [120, 160, 235],
+        ValaarPhase::Sparse => [150, 120, 160],
+    }
+}
+
+/// Opacity (0..=`OVERLAY_MAX_ALPHA`) for a cell holding `amount` valaar, linearly
+/// normalised by `max` (the displayed layer's peak). Non-positive `amount`/`max`
+/// is transparent; `amount >= max` is full. [V3]
+pub fn overlay_alpha(amount: f32, max: f32) -> u8 {
+    if amount <= 0.0 || max <= 0.0 {
+        return 0;
+    }
+    let frac = (amount / max).clamp(0.0, 1.0);
+    (frac * OVERLAY_MAX_ALPHA as f32).round() as u8
+}
+
 /// Fill `buf` (`width*height`, row-major) with the view of `map`'s `layer` under
 /// `cam`. Each cell is a solid `fallback_rgb`; out-of-bounds cells are `BACKDROP`.
 pub fn render_to_buffer<S: Space>(
@@ -94,6 +124,7 @@ mod tests {
     use super::*;
     use crate::space::{Coord, Grid2p5D, Layer, Space};
     use crate::terrain::{CellType, TerrainMap};
+    use crate::valaar::ValaarPhase;
 
     fn pack(rgb: [u8; 3]) -> u32 {
         ((rgb[0] as u32) << 16) | ((rgb[1] as u32) << 8) | rgb[2] as u32
@@ -147,5 +178,42 @@ mod tests {
         cam.pan_pixels(16.0, 32.0); // drag one cell right, two down
         assert!((cam.cx + 1.0).abs() < 1e-3);
         assert!((cam.cy + 2.0).abs() < 1e-3);
+    }
+
+    #[test]
+    fn every_phase_has_a_distinct_hue_and_none_match_crystal() {
+        let mut seen = std::collections::HashSet::new();
+        for p in [
+            ValaarPhase::Liquid,
+            ValaarPhase::Gaseous,
+            ValaarPhase::Crystalline,
+            ValaarPhase::Sparse,
+        ] {
+            assert!(seen.insert(phase_rgb(p)), "duplicate hue for {p:?}");
+        }
+        assert!(!seen.contains(&CRYSTAL_RGB), "crystal tint must be distinct");
+    }
+
+    #[test]
+    fn alpha_is_zero_without_valaar_or_max() {
+        assert_eq!(overlay_alpha(0.0, 10.0), 0);
+        assert_eq!(overlay_alpha(5.0, 0.0), 0);
+        assert_eq!(overlay_alpha(-1.0, 10.0), 0);
+    }
+
+    #[test]
+    fn alpha_is_full_at_the_peak_and_linear_below() {
+        assert_eq!(overlay_alpha(10.0, 10.0), OVERLAY_MAX_ALPHA);
+        assert_eq!(overlay_alpha(20.0, 10.0), OVERLAY_MAX_ALPHA, "clamps above the peak");
+        let half = overlay_alpha(5.0, 10.0);
+        assert!(
+            (half as i32 - (OVERLAY_MAX_ALPHA as i32 / 2)).abs() <= 1,
+            "half the peak ~ half alpha, got {half}"
+        );
+    }
+
+    #[test]
+    fn alpha_is_monotonic_in_amount() {
+        assert!(overlay_alpha(2.0, 10.0) < overlay_alpha(7.0, 10.0));
     }
 }
