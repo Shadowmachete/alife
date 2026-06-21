@@ -27,13 +27,13 @@ pub struct BridgeConfig {
 impl Default for BridgeConfig {
     fn default() -> Self {
         BridgeConfig {
-            max_gap: 8,
+            max_gap: 15,
             min_width: 3,
             max_width: 6,
             site_fraction: 0.5,
             open_fraction: 0.5,
-            min_duration: 20,
-            max_duration: 80,
+            min_duration: 80,
+            max_duration: 100,
         }
     }
 }
@@ -125,7 +125,8 @@ pub fn find_bridge_sites(
             continue; // overlaps an already-carved site
         }
         let span = (cfg.max_width.saturating_sub(cfg.min_width) + 1) as f32;
-        let width = (cfg.min_width + (rng.next_unit() * span) as u32).clamp(cfg.min_width, cfg.max_width);
+        let width =
+            (cfg.min_width + (rng.next_unit() * span) as u32).clamp(cfg.min_width, cfg.max_width);
         let mut cells = Vec::new();
         for &c in &run {
             let cx = (c as u32) % sw;
@@ -187,7 +188,14 @@ pub struct Bridges {
 impl Bridges {
     pub fn new(sites: Vec<BridgeSite>, cfg: BridgeConfig, seed: u64) -> Self {
         let n = sites.len();
-        Bridges { sites, cfg, open: vec![false; n], window: vec![None; n], scheduled_year: None, rng: Rng::new(seed) }
+        Bridges {
+            sites,
+            cfg,
+            open: vec![false; n],
+            window: vec![None; n],
+            scheduled_year: None,
+            rng: Rng::new(seed),
+        }
     }
 
     pub fn site_count(&self) -> usize {
@@ -204,9 +212,11 @@ impl Bridges {
         for i in 0..self.window.len() {
             if self.rng.next_unit() < cfg.open_fraction {
                 let span = (cfg.max_duration.saturating_sub(cfg.min_duration) + 1) as f32;
-                let dur = (cfg.min_duration + (self.rng.next_unit() * span) as u32).clamp(1, CRAWS_PER_ARH);
+                let dur = (cfg.min_duration + (self.rng.next_unit() * span) as u32)
+                    .clamp(1, CRAWS_PER_ARH);
                 let latest_start = CRAWS_PER_ARH.saturating_sub(dur);
-                let off = ((self.rng.next_unit() * (latest_start + 1) as f32) as u32).min(latest_start);
+                let off =
+                    ((self.rng.next_unit() * (latest_start + 1) as f32) as u32).min(latest_start);
                 let open_craw = vraze_start + off;
                 let close_craw = (open_craw + dur).min(vraze_end);
                 self.window[i] = Some((open_craw, close_craw));
@@ -228,8 +238,8 @@ impl Bridges {
         }
         let craw = calendar.craw();
         for i in 0..self.sites.len() {
-            let want_open = in_vraze
-                && matches!(self.window[i], Some((o, c)) if craw >= o && craw < c);
+            let want_open =
+                in_vraze && matches!(self.window[i], Some((o, c)) if craw >= o && craw < c);
             if want_open && !self.open[i] {
                 self.open[i] = true;
                 upd.opened.extend_from_slice(&self.sites[i].cells);
@@ -254,14 +264,24 @@ mod tests {
         let mut mats = Vec::with_capacity((sw * sh) as usize);
         for r in rows {
             for ch in r.chars() {
-                mats.push(if ch == 'O' { CellType::Ocean } else { CellType::Land });
+                mats.push(if ch == 'O' {
+                    CellType::Ocean
+                } else {
+                    CellType::Land
+                });
             }
         }
         (sw, sh, mats)
     }
 
     fn cfg_keep_all(min_width: u32, max_width: u32, max_gap: u32) -> BridgeConfig {
-        BridgeConfig { max_gap, min_width, max_width, site_fraction: 1.0, ..BridgeConfig::default() }
+        BridgeConfig {
+            max_gap,
+            min_width,
+            max_width,
+            site_fraction: 1.0,
+            ..BridgeConfig::default()
+        }
     }
 
     #[test]
@@ -291,7 +311,10 @@ mod tests {
         assert_eq!(n, 1);
         let mut rng = Rng::new(1);
         let sites = find_bridge_sites(&m, sw, sh, &labels, &mut rng, &cfg_keep_all(1, 1, 4));
-        assert!(sites.is_empty(), "same continent on both sides -> not a strait");
+        assert!(
+            sites.is_empty(),
+            "same continent on both sides -> not a strait"
+        );
     }
 
     #[test]
@@ -308,8 +331,22 @@ mod tests {
     fn is_seed_deterministic() {
         let (sw, sh, m) = grid(&["LLOOLL", "LLOOLL"]);
         let (labels, _) = label_continents(&m, sw, sh);
-        let a = find_bridge_sites(&m, sw, sh, &labels, &mut Rng::new(9), &BridgeConfig::default());
-        let b = find_bridge_sites(&m, sw, sh, &labels, &mut Rng::new(9), &BridgeConfig::default());
+        let a = find_bridge_sites(
+            &m,
+            sw,
+            sh,
+            &labels,
+            &mut Rng::new(9),
+            &BridgeConfig::default(),
+        );
+        let b = find_bridge_sites(
+            &m,
+            sw,
+            sh,
+            &labels,
+            &mut Rng::new(9),
+            &BridgeConfig::default(),
+        );
         assert_eq!(a, b);
     }
 
@@ -323,7 +360,10 @@ mod tests {
 
     #[test]
     fn closed_outside_vraze() {
-        let cfg = BridgeConfig { open_fraction: 1.0, ..BridgeConfig::default() };
+        let cfg = BridgeConfig {
+            open_fraction: 1.0,
+            ..BridgeConfig::default()
+        };
         let mut b = Bridges::new(vec![BridgeSite { cells: vec![5, 6] }], cfg, 7);
         let upd = b.update(&cal_at(150)); // Goscon
         assert!(upd.opened.is_empty() && upd.closed.is_empty());
@@ -331,7 +371,12 @@ mod tests {
 
     #[test]
     fn opens_then_closes_within_vraze() {
-        let cfg = BridgeConfig { open_fraction: 1.0, min_duration: 10, max_duration: 10, ..BridgeConfig::default() };
+        let cfg = BridgeConfig {
+            open_fraction: 1.0,
+            min_duration: 10,
+            max_duration: 10,
+            ..BridgeConfig::default()
+        };
         let mut b = Bridges::new(vec![BridgeSite { cells: vec![5, 6] }], cfg, 7);
         let mut opened_at = None;
         let mut closed_at = None;
@@ -348,14 +393,22 @@ mod tests {
             }
             c.advance();
         }
-        let (o, cl) = (opened_at.expect("opened in Vraze"), closed_at.expect("closed in Vraze"));
+        let (o, cl) = (
+            opened_at.expect("opened in Vraze"),
+            closed_at.expect("closed in Vraze"),
+        );
         assert!(cl > o, "closes after it opens");
     }
 
     #[test]
     fn open_bridge_cells_are_risen_ocean() {
         // surface plane (4 cells) + an underground layer (4 cells) in the mask.
-        let mats = vec![CellType::Land, CellType::Ocean, CellType::Ocean, CellType::Land];
+        let mats = vec![
+            CellType::Land,
+            CellType::Ocean,
+            CellType::Ocean,
+            CellType::Land,
+        ];
         let mask = vec![true, true, false, true, true, true, true, true];
         assert_eq!(open_bridge_cells(&mats, Some(&mask)), vec![1]); // ocean + passable
         assert_eq!(open_bridge_cells(&mats, None), Vec::<usize>::new());
@@ -363,8 +416,15 @@ mod tests {
 
     #[test]
     fn schedule_is_seed_deterministic() {
-        let cfg = BridgeConfig { open_fraction: 0.5, ..BridgeConfig::default() };
-        let sites = vec![BridgeSite { cells: vec![1] }, BridgeSite { cells: vec![2] }, BridgeSite { cells: vec![3] }];
+        let cfg = BridgeConfig {
+            open_fraction: 0.5,
+            ..BridgeConfig::default()
+        };
+        let sites = vec![
+            BridgeSite { cells: vec![1] },
+            BridgeSite { cells: vec![2] },
+            BridgeSite { cells: vec![3] },
+        ];
         let run = |seed| {
             let mut b = Bridges::new(sites.clone(), cfg, seed);
             let mut log = Vec::new();

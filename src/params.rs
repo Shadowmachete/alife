@@ -55,7 +55,7 @@ impl Default for EcoParams {
             mutation_rate: 0.1,
             min_lifespan: 200,
             max_lifespan: 800,
-            predation_efficiency: 0.9,
+            predation_efficiency: 0.8,
             heat_stress: 0.1,
             drought_stress: 0.1,
             initial_energy: 4.0,
