@@ -298,11 +298,12 @@ mod tests {
         let mut v = Field::zeros(2);
         let mut c = Field::zeros(2);
         v.set(0, 1.0);
-        let d = ValaarPhase::Crystalline.dynamics(); // freeze_rate 0.10
+        let d = ValaarPhase::Crystalline.dynamics();
         let before = v.total() + c.total();
         freeze_thaw(&mut v, &mut c, ValaarPhase::Crystalline, &d);
-        assert!((c.get(0) - 0.10).abs() < 1e-6);
-        assert!((v.get(0) - 0.90).abs() < 1e-6);
+        // a `freeze_rate` fraction of the 1.0 valaar froze into crystal.
+        assert!((c.get(0) - d.freeze_rate).abs() < 1e-6);
+        assert!((v.get(0) - (1.0 - d.freeze_rate)).abs() < 1e-6);
         assert!(
             (v.total() + c.total() - before).abs() < 1e-6,
             "valaar+crystal conserved"
