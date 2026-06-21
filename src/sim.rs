@@ -12,6 +12,7 @@ use crate::population::Population;
 use crate::rng::Rng;
 use crate::season::{Calendar, Season};
 use crate::space::Space;
+use crate::valaar::{self, ValaarPhase};
 use crate::world::World;
 
 pub struct Sim<S: Space> {
@@ -28,6 +29,9 @@ pub struct Sim<S: Space> {
     /// Un-multiplied Rasconne source rate, captured at construction so the
     /// per-season multiplier always scales the same base.
     base_source: f32,
+    /// Un-multiplied decay, captured at construction so the per-phase multiplier
+    /// always scales the same base.
+    base_decay: f32,
 }
 
 impl<S: Space> Sim<S> {
@@ -40,6 +44,7 @@ impl<S: Space> Sim<S> {
     pub fn with_climate(world: World<S>, eco: EcoParams, climate: Climate, seed: u64) -> Self {
         let len = world.space.len();
         let base_source = world.params.source_rate;
+        let base_decay = world.params.decay;
         Sim {
             world,
             pop: Population::new(),
@@ -51,6 +56,7 @@ impl<S: Space> Sim<S> {
             climate,
             bridges: None,
             base_source,
+            base_decay,
         }
     }
 
@@ -79,12 +85,19 @@ impl<S: Space> Sim<S> {
     pub fn step(&mut self) {
         self.calendar.advance();
         let season = self.calendar.season();
+        let phase = ValaarPhase::for_season(season);
+        let dynamics = phase.dynamics();
 
-        // [A6] valaar abundance breathes with the season.
-        self.world.params.source_rate =
-            self.base_source * climate::target(&self.climate, season).valaar_mult;
+        // [A6] valaar abundance breathes with the season; its *phase* sets how
+        // far it spreads (diffusion passes), how fast it drains (decay), and
+        // whether it crystallises.
+        let target = climate::target(&self.climate, season);
+        self.world.params.source_rate = self.base_source * target.valaar_mult;
+        self.world.params.diffuse_passes = dynamics.diffuse_passes;
+        self.world.params.decay = self.base_decay * dynamics.decay_mult;
 
         self.world.step();
+        valaar::freeze_thaw(&mut self.world.valaar, &mut self.world.crystal, phase, &dynamics);
         climate::apply_climate(&mut self.heat, &mut self.water, season, &self.climate);
 
         // Dynamic land bridges: open/close cells, drown anyone on a sunk cell.
@@ -114,5 +127,40 @@ impl<S: Space> Sim<S> {
         ecology::metabolize(&mut self.pop, &self.eco);
         ecology::cull_and_recycle(&self.world.space, &mut self.world.valaar, &mut self.pop, &self.eco);
         ecology::reproduce(&mut self.pop, &self.eco, &mut self.rng, season);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::space::{Grid2p5D, Space};
+    use crate::world::{Params, World};
+
+    #[test]
+    fn crystal_builds_in_vraze_and_thaws_after() {
+        let mut world = World::new(Grid2p5D::new(3, 3), Params::default());
+        for i in 0..world.space.len() {
+            world.valaar.set(i, 1.0); // give freezing something to grab everywhere
+        }
+        let mut sim = Sim::new(world, EcoParams::default(), 1);
+
+        while sim.calendar.season() != Season::Vraze {
+            sim.step();
+        }
+        let entering = sim.world.crystal.total();
+        for _ in 0..30 {
+            sim.step();
+        }
+        let in_vraze = sim.world.crystal.total();
+        assert!(in_vraze > entering, "crystal accumulates during Vraze");
+
+        while sim.calendar.season() == Season::Vraze {
+            sim.step();
+        }
+        for _ in 0..50 {
+            sim.step();
+        }
+        let after = sim.world.crystal.total();
+        assert!(after < in_vraze, "crystal thaws once Vraze passes");
     }
 }
