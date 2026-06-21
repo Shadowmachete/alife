@@ -31,6 +31,9 @@ impl Default for Params {
 pub struct World<S: Space> {
     pub space: S,
     pub valaar: Field,
+    /// Frozen valaar (the Vraze crystalline phase). Never diffuses or decays;
+    /// `valaar::freeze_thaw` moves valaar in and out of it. Sized to `space.len()`.
+    pub crystal: Field,
     pub params: Params,
     sources: Vec<Coord>,
     access_points: Vec<(u32, u32)>,
@@ -46,9 +49,11 @@ pub struct World<S: Space> {
 impl<S: Space> World<S> {
     pub fn new(space: S, params: Params) -> Self {
         let valaar = Field::zeros(space.len());
+        let crystal = Field::zeros(space.len());
         World {
             space,
             valaar,
+            crystal,
             params,
             sources: Vec::new(),
             access_points: Vec::new(),
@@ -138,6 +143,14 @@ mod tests {
         assert_eq!(world.valaar.total(), 0.0);
         assert!(world.sources().is_empty());
         assert!(world.access_points().is_empty());
+    }
+
+    #[test]
+    fn crystal_defaults_to_empty() {
+        let space = Grid2p5D::new(2, 2);
+        let world = World::new(space, Params::default());
+        assert_eq!(world.crystal.len(), world.space.len());
+        assert_eq!(world.crystal.total(), 0.0);
     }
 
     #[test]
