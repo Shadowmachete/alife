@@ -11,6 +11,7 @@ use alife::bridges::{find_bridge_sites, open_bridge_cells, BridgeConfig, Bridges
 use alife::params::EcoParams;
 use alife::rng::Rng;
 use alife::sim::Sim;
+use alife::world::Params;
 use alife::space::{Grid2p5D, Layer, Space};
 use alife::terrain::{CellType, TerrainMap};
 #[cfg(not(target_arch = "wasm32"))]
@@ -25,6 +26,35 @@ const SIM_SCALE: u32 = 3; // sim grid is the display grid downscaled by this
 const SEED_COUNT: usize = 1500;
 const WARM_STEPS: usize = 150; // spread valaar before seeding life
 
+/// The editable working copy behind the Parameters panel.
+#[derive(Clone)]
+struct Tunables {
+    eco: EcoParams,
+    diffuse_rate: f32,
+    decay: f32,
+    bridges: BridgeConfig,
+}
+
+impl Default for Tunables {
+    fn default() -> Self {
+        let p = Params::default();
+        Tunables {
+            eco: EcoParams::default(),
+            diffuse_rate: p.diffuse_rate,
+            decay: p.decay,
+            bridges: BridgeConfig::default(),
+        }
+    }
+}
+
+fn slider_f32(ui: &mut egui::Ui, label: &str, v: &mut f32, range: std::ops::RangeInclusive<f32>) {
+    ui.add(egui::Slider::new(v, range).text(label));
+}
+
+fn slider_u32(ui: &mut egui::Ui, label: &str, v: &mut u32, range: std::ops::RangeInclusive<u32>) {
+    ui.add(egui::Slider::new(v, range).text(label));
+}
+
 /// A live tile simulation: the textured map, its atlas, a sim on a downscaled
 /// material grid, and cached continent labels for the stats panel.
 struct TileSim {
@@ -35,6 +65,7 @@ struct TileSim {
     continents: Vec<Option<u32>>, // per sim-cell continent label
     n_continents: u32,
     running: bool,
+    tunables: Tunables,
 }
 
 impl TileSim {
@@ -86,6 +117,7 @@ fn build_tile_scene(xml: &str, atlas_bytes: &[u8]) -> Scene {
         continents,
         n_continents,
         running: true,
+        tunables: Tunables::default(),
     };
     t.reseed();
     Scene::Tiles(Box::new(t))
@@ -195,6 +227,56 @@ fn draw_organisms(painter: &egui::Painter, rect: egui::Rect, cam: &Camera, t: &T
     }
 }
 
+/// The collapsible Parameters panel: sliders for every dial. Ecology applies
+/// live; valaar/bridge sliders are staged and take effect on Reload (handled by
+/// the caller). Returns `true` if the Reload button was clicked.
+fn parameters_ui(ui: &mut egui::Ui, tun: &mut Tunables) -> bool {
+    let mut reload = false;
+    egui::CollapsingHeader::new("Parameters").default_open(false).show(ui, |ui| {
+        ui.label(egui::RichText::new("Ecology (live)").strong());
+        let e = &mut tun.eco;
+        slider_f32(ui, "uptake_rate", &mut e.uptake_rate, 0.0..=1.0);
+        slider_f32(ui, "move_cost", &mut e.move_cost, 0.0..=0.2);
+        slider_f32(ui, "basal_cost", &mut e.basal_cost, 0.0..=0.2);
+        slider_f32(ui, "repro_cost_fraction", &mut e.repro_cost_fraction, 0.0..=1.0);
+        slider_f32(ui, "mutation_rate", &mut e.mutation_rate, 0.0..=0.5);
+        slider_f32(ui, "rasgun_mutation_mult", &mut e.rasgun_mutation_mult, 1.0..=5.0);
+        slider_f32(ui, "predation_efficiency", &mut e.predation_efficiency, 0.0..=1.0);
+        slider_f32(ui, "heat_stress", &mut e.heat_stress, 0.0..=1.0);
+        slider_f32(ui, "drought_stress", &mut e.drought_stress, 0.0..=1.0);
+        slider_f32(ui, "detritus_fraction", &mut e.detritus_fraction, 0.0..=1.0);
+        slider_f32(ui, "valaar_drain", &mut e.valaar_drain, 0.0..=1.0);
+        slider_f32(ui, "base_energy", &mut e.base_energy, 0.5..=16.0);
+        slider_f32(ui, "size_energy", &mut e.size_energy, 0.0..=32.0);
+        slider_f32(ui, "size_cost", &mut e.size_cost, 0.0..=0.2);
+        slider_f32(ui, "initial_energy", &mut e.initial_energy, 0.5..=16.0);
+        slider_u32(ui, "min_lifespan", &mut e.min_lifespan, 1..=1000);
+        slider_u32(ui, "max_lifespan", &mut e.max_lifespan, 1..=4000);
+
+        ui.separator();
+        ui.label(egui::RichText::new("Valaar (reload)").strong());
+        slider_f32(ui, "diffuse_rate", &mut tun.diffuse_rate, 0.0..=0.24);
+        slider_f32(ui, "decay", &mut tun.decay, 0.0..=0.2);
+
+        ui.separator();
+        ui.label(egui::RichText::new("Bridges (reload)").strong());
+        let b = &mut tun.bridges;
+        slider_u32(ui, "max_gap", &mut b.max_gap, 1..=30);
+        slider_u32(ui, "min_width", &mut b.min_width, 1..=10);
+        slider_u32(ui, "max_width", &mut b.max_width, 1..=12);
+        slider_f32(ui, "site_fraction", &mut b.site_fraction, 0.0..=1.0);
+        slider_f32(ui, "open_fraction", &mut b.open_fraction, 0.0..=1.0);
+        slider_u32(ui, "min_duration", &mut b.min_duration, 1..=117);
+        slider_u32(ui, "max_duration", &mut b.max_duration, 1..=117);
+
+        ui.separator();
+        if ui.button("Reload (fresh run)").clicked() {
+            reload = true;
+        }
+    });
+    reload
+}
+
 struct MapApp {
     scene: Scene,
     cam: Camera,
@@ -246,6 +328,9 @@ impl eframe::App for MapApp {
                             t.reseed();
                         }
                     });
+                    ui.separator();
+                    let _reload = parameters_ui(ui, &mut t.tunables);
+                    t.sim.eco = t.tunables.eco; // ecology applies live
                 }
                 Scene::Terrain { layer, .. } => {
                     ui.label(format!("layer: {layer:?}"));
