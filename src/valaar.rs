@@ -77,6 +77,30 @@ impl ValaarPhase {
     }
 }
 
+/// Move valaar between the liquid field and the frozen `crystal` field. During
+/// the `Crystalline` phase a `freeze_rate` fraction of each cell's valaar freezes
+/// into crystal; in every other phase a `thaw_rate` fraction of crystal thaws
+/// back into valaar. Crystal never diffuses or decays, so it carries valaar
+/// forward in time. Conserves the `valaar + crystal` total.
+pub fn freeze_thaw(valaar: &mut Field, crystal: &mut Field, phase: ValaarPhase, d: &PhaseDynamics) {
+    match phase {
+        ValaarPhase::Crystalline => {
+            for i in 0..valaar.len() {
+                let f = valaar.get(i) * d.freeze_rate;
+                valaar.set(i, valaar.get(i) - f);
+                crystal.add(i, f);
+            }
+        }
+        _ => {
+            for i in 0..crystal.len() {
+                let t = crystal.get(i) * d.thaw_rate;
+                crystal.set(i, crystal.get(i) - t);
+                valaar.add(i, t);
+            }
+        }
+    }
+}
+
 /// Inject valaar at each source cell (e.g. the Rasconne reservoir).
 pub fn inject_sources<S: Space>(space: &S, field: &mut Field, sources: &[Coord], rate: f32) {
     for &c in sources {
@@ -239,5 +263,29 @@ mod tests {
         let s = ValaarPhase::Sparse.dynamics();
         assert!(s.decay_mult > 1.0, "sparse drains faster");
         assert!(ValaarPhase::Liquid.dynamics().thaw_rate > 0.0, "non-crystalline thaws crystal back");
+    }
+
+    #[test]
+    fn freeze_moves_valaar_into_crystal_and_conserves() {
+        let mut v = Field::zeros(2);
+        let mut c = Field::zeros(2);
+        v.set(0, 1.0);
+        let d = ValaarPhase::Crystalline.dynamics(); // freeze_rate 0.10
+        let before = v.total() + c.total();
+        freeze_thaw(&mut v, &mut c, ValaarPhase::Crystalline, &d);
+        assert!((c.get(0) - 0.10).abs() < 1e-6);
+        assert!((v.get(0) - 0.90).abs() < 1e-6);
+        assert!((v.total() + c.total() - before).abs() < 1e-6, "valaar+crystal conserved");
+    }
+
+    #[test]
+    fn thaw_returns_crystal_to_valaar_off_crystalline() {
+        let mut v = Field::zeros(1);
+        let mut c = Field::zeros(1);
+        c.set(0, 1.0);
+        let d = ValaarPhase::Liquid.dynamics(); // thaw_rate 0.02
+        freeze_thaw(&mut v, &mut c, ValaarPhase::Liquid, &d);
+        assert!((c.get(0) - 0.98).abs() < 1e-6);
+        assert!((v.get(0) - 0.02).abs() < 1e-6);
     }
 }
