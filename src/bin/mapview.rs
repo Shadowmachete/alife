@@ -7,7 +7,7 @@
 use alife::mapsim::{
     compute_stats, downscale, label_continents, marker_color, seed_on_fed_land, world_from_materials,
 };
-use alife::bridges::{find_bridge_sites, BridgeConfig, Bridges};
+use alife::bridges::{find_bridge_sites, open_bridge_cells, BridgeConfig, Bridges};
 use alife::params::EcoParams;
 use alife::rng::Rng;
 use alife::sim::Sim;
@@ -155,6 +155,25 @@ fn to_color_image(buf: &[u32], w: usize, h: usize) -> egui::ColorImage {
     egui::ColorImage { size: [w, h], pixels }
 }
 
+/// Paint each currently-open land bridge cell as a sandy ribbon. The static
+/// tile layer can't reflect the dynamic passability flips, so this overlays the
+/// risen land (under the organisms) wherever an ocean cell has become passable.
+fn draw_bridges(painter: &egui::Painter, rect: egui::Rect, cam: &Camera, t: &TileSim) {
+    let cell_px = cam.zoom * SIM_SCALE as f32;
+    let sw = t.sim.world.space.width();
+    let sand = egui::Color32::from_rgb(206, 175, 120);
+    for i in open_bridge_cells(&t.mats, t.sim.world.passability()) {
+        let cx = (i as u32 % sw) * SIM_SCALE;
+        let cy = (i as u32 / sw) * SIM_SCALE;
+        let sx = rect.min.x + (cx as f32 - cam.cx) * cam.zoom;
+        let sy = rect.min.y + (cy as f32 - cam.cy) * cam.zoom;
+        let cell = egui::Rect::from_min_size(egui::pos2(sx, sy), egui::vec2(cell_px, cell_px));
+        if rect.intersects(cell) {
+            painter.rect_filled(cell, 0.0, sand);
+        }
+    }
+}
+
 /// Draw each organism as an outlined circle inside `rect`: radius scales with
 /// body size and zoom, fill by diet, with a darker ring behind for contrast.
 fn draw_organisms(painter: &egui::Painter, rect: egui::Rect, cam: &Camera, t: &TileSim) {
@@ -286,7 +305,8 @@ impl eframe::App for MapApp {
             }
 
             if let Scene::Tiles(t) = &self.scene {
-                let painter = ui.painter_at(rect); // clip organisms to the map rect
+                let painter = ui.painter_at(rect); // clip overlays to the map rect
+                draw_bridges(&painter, rect, &self.cam, t);
                 draw_organisms(&painter, rect, &self.cam, t);
             }
         });

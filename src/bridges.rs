@@ -150,6 +150,19 @@ pub fn find_bridge_sites(
     sites
 }
 
+/// Surface-plane cells that are currently an *open* land bridge: originally
+/// Ocean (per `mats`) but presently passable (the bridge has risen). Returns
+/// empty if no passability mask is installed. Used by the viewer to paint the
+/// temporary land, since the static tile layer can't show it.
+pub fn open_bridge_cells(mats: &[CellType], passability: Option<&[bool]>) -> Vec<usize> {
+    let Some(mask) = passability else {
+        return Vec::new();
+    };
+    (0..mats.len())
+        .filter(|&i| mats[i] == CellType::Ocean && mask.get(i).copied().unwrap_or(false))
+        .collect()
+}
+
 /// Cells whose passability changed this tick.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct BridgeUpdate {
@@ -337,6 +350,15 @@ mod tests {
         }
         let (o, cl) = (opened_at.expect("opened in Vraze"), closed_at.expect("closed in Vraze"));
         assert!(cl > o, "closes after it opens");
+    }
+
+    #[test]
+    fn open_bridge_cells_are_risen_ocean() {
+        // surface plane (4 cells) + an underground layer (4 cells) in the mask.
+        let mats = vec![CellType::Land, CellType::Ocean, CellType::Ocean, CellType::Land];
+        let mask = vec![true, true, false, true, true, true, true, true];
+        assert_eq!(open_bridge_cells(&mats, Some(&mask)), vec![1]); // ocean + passable
+        assert_eq!(open_bridge_cells(&mats, None), Vec::<usize>::new());
     }
 
     #[test]
