@@ -64,7 +64,7 @@ impl ValaarPhase {
             ValaarPhase::Crystalline => PhaseDynamics {
                 diffuse_passes: 0,
                 decay_mult: 0.5,
-                freeze_rate: 0.10,
+                freeze_rate: 0.20,
                 thaw_rate: 0.0,
             },
             ValaarPhase::Sparse => PhaseDynamics {
@@ -163,10 +163,19 @@ mod tests {
     fn inject_adds_rate_at_each_source() {
         let space = Grid2p5D::new(4, 4);
         let mut field = Field::zeros(space.len());
-        let sources = [Coord::new(1, 1, Layer::Surface), Coord::new(2, 2, Layer::Surface)];
+        let sources = [
+            Coord::new(1, 1, Layer::Surface),
+            Coord::new(2, 2, Layer::Surface),
+        ];
         inject_sources(&space, &mut field, &sources, 3.0);
-        assert_eq!(field.get(space.index(Coord::new(1, 1, Layer::Surface))), 3.0);
-        assert_eq!(field.get(space.index(Coord::new(2, 2, Layer::Surface))), 3.0);
+        assert_eq!(
+            field.get(space.index(Coord::new(1, 1, Layer::Surface))),
+            3.0
+        );
+        assert_eq!(
+            field.get(space.index(Coord::new(2, 2, Layer::Surface))),
+            3.0
+        );
         assert_eq!(field.total(), 6.0);
     }
 
@@ -188,7 +197,11 @@ mod tests {
         for _ in 0..20 {
             diffuse_planar(&space, &mut field, 0.2);
         }
-        assert!((field.total() - before).abs() < 1e-3, "total drifted: {}", field.total());
+        assert!(
+            (field.total() - before).abs() < 1e-3,
+            "total drifted: {}",
+            field.total()
+        );
     }
 
     #[test]
@@ -200,7 +213,10 @@ mod tests {
         diffuse_planar(&space, &mut field, 0.2);
         let neighbor = Coord::new(5, 4, Layer::Surface);
         assert!(field.get(space.index(center)) < 100.0, "spike should drop");
-        assert!(field.get(space.index(neighbor)) > 0.0, "neighbour should rise");
+        assert!(
+            field.get(space.index(neighbor)) > 0.0,
+            "neighbour should rise"
+        );
     }
 
     #[test]
@@ -210,7 +226,10 @@ mod tests {
         field.set(space.index(Coord::new(2, 2, Layer::Surface)), 50.0);
         diffuse_planar(&space, &mut field, 0.2);
         // underground stays empty: planar diffusion never crosses layers
-        assert_eq!(field.get(space.index(Coord::new(2, 2, Layer::Underground))), 0.0);
+        assert_eq!(
+            field.get(space.index(Coord::new(2, 2, Layer::Underground))),
+            0.0
+        );
     }
 
     #[test]
@@ -224,7 +243,10 @@ mod tests {
         exchange_layers(&space, &mut field, &[(2, 2)], 0.1);
         assert!(field.get(surf) > 0.0, "surface should gain from below");
         assert!(field.get(under) < 10.0, "underground should drop");
-        assert!((field.total() - before).abs() < 1e-6, "exchange must conserve");
+        assert!(
+            (field.total() - before).abs() < 1e-6,
+            "exchange must conserve"
+        );
     }
 
     #[test]
@@ -254,7 +276,10 @@ mod tests {
     fn phase_dynamics_match_their_intent() {
         let c = ValaarPhase::Crystalline.dynamics();
         assert_eq!(c.diffuse_passes, 0, "crystalline locks valaar in place");
-        assert!(c.freeze_rate > 0.0 && c.thaw_rate == 0.0, "crystalline freezes, never thaws");
+        assert!(
+            c.freeze_rate > 0.0 && c.thaw_rate == 0.0,
+            "crystalline freezes, never thaws"
+        );
         let g = ValaarPhase::Gaseous.dynamics();
         assert!(
             g.diffuse_passes > ValaarPhase::Liquid.dynamics().diffuse_passes,
@@ -262,7 +287,10 @@ mod tests {
         );
         let s = ValaarPhase::Sparse.dynamics();
         assert!(s.decay_mult > 1.0, "sparse drains faster");
-        assert!(ValaarPhase::Liquid.dynamics().thaw_rate > 0.0, "non-crystalline thaws crystal back");
+        assert!(
+            ValaarPhase::Liquid.dynamics().thaw_rate > 0.0,
+            "non-crystalline thaws crystal back"
+        );
     }
 
     #[test]
@@ -275,7 +303,10 @@ mod tests {
         freeze_thaw(&mut v, &mut c, ValaarPhase::Crystalline, &d);
         assert!((c.get(0) - 0.10).abs() < 1e-6);
         assert!((v.get(0) - 0.90).abs() < 1e-6);
-        assert!((v.total() + c.total() - before).abs() < 1e-6, "valaar+crystal conserved");
+        assert!(
+            (v.total() + c.total() - before).abs() < 1e-6,
+            "valaar+crystal conserved"
+        );
     }
 
     #[test]
