@@ -29,6 +29,10 @@ are the same resource).
   valaar). Each season rewards a *different* adaptation — the edge-of-chaos engine.
   During **Vraze**, temporary **land bridges** rise across narrow straits (gene
   flow between continents); the mutation rate spikes during **Rasgun**.
+  Valaar also changes **phase** with the season: gaseous in **Miscre** (fog
+  carries it out to the Dusk), **crystalline** in **Vraze** (it freezes into a
+  locked *crystal* store that thaws back over later seasons, carrying valaar
+  forward in time), and sparse in **Dansch/Laisp**.
 - **Every environmental axis has a matching gene** (you can't adapt to what you
   can't sense): valaar↔`valaar_efficiency`, heat↔`heat_tolerance`,
   water↔`drought_tolerance`. A `swim` gene lets life **tunnel straight through** a
