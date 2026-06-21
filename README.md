@@ -27,6 +27,9 @@ are the same resource).
 - **The 6-arh year** (702 craws): Rasgun (surge) → Goscon (stable) → Miscre
   (monsoon/fog) → Vraze (quakes/crystalline) → Dansch (drought) → Laisp (lowest
   valaar). Each season rewards a *different* adaptation — the edge-of-chaos engine.
+  During **Vraze**, temporary **land bridges** rise across narrow straits (gene
+  flow between continents); mutation rate is a **field** — fast in the valaar-rich
+  core, slow in the Dusk, and spiking in **Rasgun**.
 - **Every environmental axis has a matching gene** (you can't adapt to what you
   can't sense): valaar↔`valaar_efficiency`, heat↔`heat_tolerance`,
   water↔`drought_tolerance`. A `swim` gene lets life **tunnel straight through** a
