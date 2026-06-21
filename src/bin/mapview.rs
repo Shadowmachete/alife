@@ -13,13 +13,14 @@ use alife::rng::Rng;
 use alife::history::{ContinentPoint, History, Snapshot};
 use alife::season::CRAWS_PER_YEAR;
 use alife::sim::Sim;
+use alife::valaar::ValaarPhase;
 use alife::world::Params;
-use alife::space::{Grid2p5D, Layer, Space};
+use alife::space::{Coord, Grid2p5D, Layer, Space};
 use alife::terrain::{CellType, TerrainMap};
 #[cfg(not(target_arch = "wasm32"))]
 use alife::terrain::load_json;
 use alife::tilemap::{material_grid, parse_tmx, render_tiles_to_buffer, Atlas, TileMap};
-use alife::viewer::{render_to_buffer, Camera};
+use alife::viewer::{overlay_alpha, phase_rgb, render_to_buffer, Camera, CRYSTAL_RGB};
 use eframe::egui;
 use egui_plot::{Legend, Line, Plot, PlotPoints};
 #[cfg(not(target_arch = "wasm32"))]
@@ -75,6 +76,7 @@ struct TileSim {
     tunables: Tunables,
     history: History,
     show_charts: bool,
+    show_valaar: bool,
     show_total: bool,
     continent_visible: Vec<bool>,
 }
@@ -156,6 +158,7 @@ fn build_tile_scene(xml: &str, atlas_bytes: &[u8]) -> Scene {
         tunables,
         history: History::new(HISTORY_CAP),
         show_charts: false,
+        show_valaar: false,
         show_total: true,
         continent_visible: vec![true; n_continents as usize],
     };
@@ -242,6 +245,49 @@ fn draw_bridges(painter: &egui::Painter, rect: egui::Rect, cam: &Camera, t: &Til
         let cell = egui::Rect::from_min_size(egui::pos2(sx, sy), egui::vec2(cell_px, cell_px));
         if rect.intersects(cell) {
             painter.rect_filled(cell, 0.0, sand);
+        }
+    }
+}
+
+/// Paint a translucent valaar overlay over the map for `layer`: per sim-cell, a
+/// rectangle whose opacity tracks the cell's valaar (normalised by the layer's
+/// peak) and whose hue is the current phase. Cells where frozen `crystal`
+/// outweighs liquid valaar are drawn in the icy `CRYSTAL_RGB` instead.
+fn draw_valaar(painter: &egui::Painter, rect: egui::Rect, cam: &Camera, t: &TileSim, layer: Layer) {
+    let space = &t.sim.world.space;
+    let (sw, sh) = (space.width(), space.height());
+    let hue = phase_rgb(ValaarPhase::for_season(t.sim.season()));
+    // Per-frame, per-layer peak for normalisation [V4].
+    let mut max_v = 0.0f32;
+    for y in 0..sh {
+        for x in 0..sw {
+            let i = space.index(Coord::new(x, y, layer));
+            max_v = max_v.max(t.sim.world.valaar.get(i)).max(t.sim.world.crystal.get(i));
+        }
+    }
+    let cell_px = cam.zoom * SIM_SCALE as f32;
+    for y in 0..sh {
+        for x in 0..sw {
+            let i = space.index(Coord::new(x, y, layer));
+            let v = t.sim.world.valaar.get(i);
+            let cr = t.sim.world.crystal.get(i);
+            let (rgb, amount) = if cr > v { (CRYSTAL_RGB, cr) } else { (hue, v) };
+            let a = overlay_alpha(amount, max_v);
+            if a == 0 {
+                continue;
+            }
+            let dx = (x * SIM_SCALE) as f32;
+            let dy = (y * SIM_SCALE) as f32;
+            let sx = rect.min.x + (dx - cam.cx) * cam.zoom;
+            let sy = rect.min.y + (dy - cam.cy) * cam.zoom;
+            let cell = egui::Rect::from_min_size(egui::pos2(sx, sy), egui::vec2(cell_px, cell_px));
+            if rect.intersects(cell) {
+                painter.rect_filled(
+                    cell,
+                    0.0,
+                    egui::Color32::from_rgba_unmultiplied(rgb[0], rgb[1], rgb[2], a),
+                );
+            }
         }
     }
 }
@@ -388,6 +434,17 @@ impl eframe::App for MapApp {
                     }
                     ui.separator();
                     ui.checkbox(&mut t.show_charts, "Charts");
+                    ui.checkbox(&mut t.show_valaar, "Valaar");
+                    if t.show_valaar {
+                        let phase = ValaarPhase::for_season(t.sim.season());
+                        let [r, g, b] = phase_rgb(phase);
+                        ui.horizontal(|ui| {
+                            let (resp, painter) =
+                                ui.allocate_painter(egui::vec2(12.0, 12.0), egui::Sense::hover());
+                            painter.rect_filled(resp.rect, 2.0, egui::Color32::from_rgb(r, g, b));
+                            ui.label(format!("phase: {phase:?}"));
+                        });
+                    }
                 }
                 Scene::Terrain { layer, .. } => {
                     ui.label(format!("layer: {layer:?}"));
@@ -501,6 +558,9 @@ impl eframe::App for MapApp {
             if let Scene::Tiles(t) = &self.scene {
                 let painter = ui.painter_at(rect); // clip overlays to the map rect
                 draw_bridges(&painter, rect, &self.cam, t);
+                if t.show_valaar {
+                    draw_valaar(&painter, rect, &self.cam, t, Layer::Surface);
+                }
                 draw_organisms(&painter, rect, &self.cam, t);
             }
         });
