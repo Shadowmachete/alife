@@ -10,6 +10,8 @@ use alife::mapsim::{
 use alife::bridges::{find_bridge_sites, open_bridge_cells, BridgeConfig, Bridges};
 use alife::params::EcoParams;
 use alife::rng::Rng;
+use alife::history::{ContinentPoint, History, Snapshot};
+use alife::season::CRAWS_PER_YEAR;
 use alife::sim::Sim;
 use alife::world::Params;
 use alife::space::{Grid2p5D, Layer, Space};
@@ -19,6 +21,7 @@ use alife::terrain::load_json;
 use alife::tilemap::{material_grid, parse_tmx, render_tiles_to_buffer, Atlas, TileMap};
 use alife::viewer::{render_to_buffer, Camera};
 use eframe::egui;
+use egui_plot::{Legend, Line, Plot, PlotPoints};
 #[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
@@ -27,6 +30,8 @@ const SEED_COUNT: usize = 1500;
 const WARM_STEPS: usize = 150; // spread valaar before seeding life
 const SIM_SEED: u64 = 0xA11FE;
 const BRIDGE_SEED: u64 = 0xB12D6E;
+const HISTORY_CAP: usize = 4000;
+const SAMPLE_EVERY: u32 = 5;
 
 /// The editable working copy behind the Parameters panel.
 #[derive(Clone)]
@@ -68,6 +73,10 @@ struct TileSim {
     n_continents: u32,
     running: bool,
     tunables: Tunables,
+    history: History,
+    show_charts: bool,
+    show_total: bool,
+    continent_visible: Vec<bool>,
 }
 
 impl TileSim {
@@ -83,6 +92,7 @@ impl TileSim {
         let sh = self.sim.world.space.height();
         self.sim = build_sim(&self.mats, sw, sh, &self.continents, &self.tunables);
         self.reseed();
+        self.history.clear();
     }
 }
 
@@ -144,6 +154,10 @@ fn build_tile_scene(xml: &str, atlas_bytes: &[u8]) -> Scene {
         n_continents,
         running: true,
         tunables,
+        history: History::new(HISTORY_CAP),
+        show_charts: false,
+        show_total: true,
+        continent_visible: vec![true; n_continents as usize],
     };
     t.reseed();
     Scene::Tiles(Box::new(t))
@@ -320,10 +334,22 @@ impl MapApp {
 
 impl eframe::App for MapApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
-        // Advance the live sim each frame (Tiles scene only, when running).
+        // Advance the live sim each frame (Tiles scene only, when running) and
+        // sample the population into the history buffer for the charts.
         if let Scene::Tiles(t) = &mut self.scene {
             if t.running {
                 t.sim.step();
+                if t.sim.calendar.craw() % SAMPLE_EVERY == 0 {
+                    let sw = t.sim.world.space.width();
+                    let s = compute_stats(&t.sim.pop, sw, &t.continents, t.n_continents);
+                    let x = (t.sim.calendar.year() * CRAWS_PER_YEAR + t.sim.calendar.craw()) as f64;
+                    let continents = s
+                        .continents
+                        .iter()
+                        .map(|cs| ContinentPoint { label: cs.label, count: cs.count, mean_size: cs.mean_size })
+                        .collect();
+                    t.history.push(Snapshot { x, total: s.total, mean_size: s.mean_size, continents });
+                }
             }
         }
 
@@ -360,6 +386,8 @@ impl eframe::App for MapApp {
                     if reload {
                         t.rebuild();
                     }
+                    ui.separator();
+                    ui.checkbox(&mut t.show_charts, "Charts");
                 }
                 Scene::Terrain { layer, .. } => {
                     ui.label(format!("layer: {layer:?}"));
@@ -372,6 +400,58 @@ impl eframe::App for MapApp {
                 }
             }
         });
+
+        if let Scene::Tiles(t) = &mut self.scene {
+            if t.show_charts {
+                egui::TopBottomPanel::bottom("charts")
+                    .resizable(true)
+                    .default_height(240.0)
+                    .show(ctx, |ui| {
+                        ui.horizontal_wrapped(|ui| {
+                            ui.checkbox(&mut t.show_total, "total / mean");
+                            for (label, vis) in t.continent_visible.iter_mut().enumerate() {
+                                ui.checkbox(vis, format!("c{label}"));
+                            }
+                        });
+
+                        ui.label("Population");
+                        Plot::new("population_plot")
+                            .legend(Legend::default())
+                            .height(90.0)
+                            .show(ui, |pui| {
+                                if t.show_total {
+                                    pui.line(Line::new(PlotPoints::from(t.history.total_series())).name("total"));
+                                }
+                                for (label, vis) in t.continent_visible.iter().enumerate() {
+                                    if *vis {
+                                        let pts = t.history.continent_count_series(label as u32);
+                                        if !pts.is_empty() {
+                                            pui.line(Line::new(PlotPoints::from(pts)).name(format!("c{label}")));
+                                        }
+                                    }
+                                }
+                            });
+
+                        ui.label("Mean body size");
+                        Plot::new("size_plot")
+                            .legend(Legend::default())
+                            .height(90.0)
+                            .show(ui, |pui| {
+                                if t.show_total {
+                                    pui.line(Line::new(PlotPoints::from(t.history.mean_size_series())).name("mean"));
+                                }
+                                for (label, vis) in t.continent_visible.iter().enumerate() {
+                                    if *vis {
+                                        let pts = t.history.continent_size_series(label as u32);
+                                        if !pts.is_empty() {
+                                            pui.line(Line::new(PlotPoints::from(pts)).name(format!("c{label}")));
+                                        }
+                                    }
+                                }
+                            });
+                    });
+            }
+        }
 
         egui::CentralPanel::default().show(ctx, |ui| {
             let avail = ui.available_size();
