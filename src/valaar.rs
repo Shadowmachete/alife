@@ -2,7 +2,80 @@
 //! `World::step`. Valaar is the world's single energy currency.
 
 use crate::field::Field;
+use crate::season::Season;
 use crate::space::{Coord, Layer, Space};
+
+/// The physical *phase* valaar takes in a given season. Beyond abundance (the
+/// climate `valaar_mult` on the source), the phase changes valaar's *dynamics*:
+/// how far it spreads, how fast it drains, and whether it crystallises.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum ValaarPhase {
+    /// Rasgun / Goscon — flows and diffuses normally.
+    Liquid,
+    /// Miscre — gaseous/fog: spreads much further (airborne valaar reaches the Dusk).
+    Gaseous,
+    /// Vraze — crystalline: stops spreading and freezes a fraction of valaar into
+    /// solid `crystal` that resists decay until later seasons thaw it.
+    Crystalline,
+    /// Dansch / Laisp — sparse: valaar drains faster and the Dusk bites hardest.
+    Sparse,
+}
+
+/// Per-phase dynamics dials.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PhaseDynamics {
+    /// Diffusion passes per tick (0 = locked). Multiple *stable* passes spread
+    /// valaar further without exceeding the per-pass coefficient limit (< 0.25).
+    pub diffuse_passes: u32,
+    /// Multiplier on the base decay rate this phase.
+    pub decay_mult: f32,
+    /// Fraction of each cell's valaar that freezes into crystal per tick.
+    pub freeze_rate: f32,
+    /// Fraction of each cell's crystal that thaws back into valaar per tick.
+    pub thaw_rate: f32,
+}
+
+impl ValaarPhase {
+    /// The phase valaar takes in `season`.
+    pub fn for_season(season: Season) -> Self {
+        match season {
+            Season::Rasgun | Season::Goscon => ValaarPhase::Liquid,
+            Season::Miscre => ValaarPhase::Gaseous,
+            Season::Vraze => ValaarPhase::Crystalline,
+            Season::Dansch | Season::Laisp => ValaarPhase::Sparse,
+        }
+    }
+
+    /// The tuning dials for this phase (tune the whole state-machine here).
+    pub fn dynamics(self) -> PhaseDynamics {
+        match self {
+            ValaarPhase::Liquid => PhaseDynamics {
+                diffuse_passes: 1,
+                decay_mult: 1.0,
+                freeze_rate: 0.0,
+                thaw_rate: 0.02,
+            },
+            ValaarPhase::Gaseous => PhaseDynamics {
+                diffuse_passes: 3,
+                decay_mult: 1.0,
+                freeze_rate: 0.0,
+                thaw_rate: 0.02,
+            },
+            ValaarPhase::Crystalline => PhaseDynamics {
+                diffuse_passes: 0,
+                decay_mult: 0.5,
+                freeze_rate: 0.10,
+                thaw_rate: 0.0,
+            },
+            ValaarPhase::Sparse => PhaseDynamics {
+                diffuse_passes: 1,
+                decay_mult: 1.5,
+                freeze_rate: 0.0,
+                thaw_rate: 0.02,
+            },
+        }
+    }
+}
 
 /// Inject valaar at each source cell (e.g. the Rasconne reservoir).
 pub fn inject_sources<S: Space>(space: &S, field: &mut Field, sources: &[Coord], rate: f32) {
@@ -140,5 +213,31 @@ mod tests {
         exchange_layers(&space, &mut field, &[(2, 2)], 0.1); // (0,0) is NOT an access point
         assert_eq!(field.get(surf), 0.0);
         assert_eq!(field.get(under), 10.0);
+    }
+
+    #[test]
+    fn phase_maps_each_season() {
+        use ValaarPhase::*;
+        assert_eq!(ValaarPhase::for_season(Season::Rasgun), Liquid);
+        assert_eq!(ValaarPhase::for_season(Season::Goscon), Liquid);
+        assert_eq!(ValaarPhase::for_season(Season::Miscre), Gaseous);
+        assert_eq!(ValaarPhase::for_season(Season::Vraze), Crystalline);
+        assert_eq!(ValaarPhase::for_season(Season::Dansch), Sparse);
+        assert_eq!(ValaarPhase::for_season(Season::Laisp), Sparse);
+    }
+
+    #[test]
+    fn phase_dynamics_match_their_intent() {
+        let c = ValaarPhase::Crystalline.dynamics();
+        assert_eq!(c.diffuse_passes, 0, "crystalline locks valaar in place");
+        assert!(c.freeze_rate > 0.0 && c.thaw_rate == 0.0, "crystalline freezes, never thaws");
+        let g = ValaarPhase::Gaseous.dynamics();
+        assert!(
+            g.diffuse_passes > ValaarPhase::Liquid.dynamics().diffuse_passes,
+            "gaseous spreads further than liquid"
+        );
+        let s = ValaarPhase::Sparse.dynamics();
+        assert!(s.decay_mult > 1.0, "sparse drains faster");
+        assert!(ValaarPhase::Liquid.dynamics().thaw_rate > 0.0, "non-crystalline thaws crystal back");
     }
 }
