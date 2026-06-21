@@ -111,6 +111,11 @@ python3 tools/png_to_rgba.py     # bake assets/sheet.png -> assets/sheet.rgba (a
 cargo run --bin mapview [map.tmx | map.json]
 ```
 
+The map viewer has a collapsible **Parameters** panel (every ecology dial tunes
+live; valaar/bridge dials apply on **Reload**, which starts a fresh run on the
+same map) and a **Charts** panel plotting population and mean body-size trends
+over time — overall and per continent, each series toggleable.
+
 Build the web demo locally (needs [`trunk`](https://trunkrs.dev) + the
 `wasm32-unknown-unknown` target). On wasm the default map + atlas are embedded in
 the binary, so no files are read at runtime:
