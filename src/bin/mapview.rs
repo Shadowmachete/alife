@@ -234,8 +234,8 @@ impl eframe::App for MapApp {
                     ui.label(format!("mean size   {:.2}", s.mean_size));
                     ui.separator();
                     ui.label(format!("continents: {}", t.n_continents));
-                    for (label, count) in s.continents.iter().filter(|(_, c)| *c > 0).take(8) {
-                        ui.label(format!("  c{label}: {count}"));
+                    for cs in s.continents.iter().filter(|cs| cs.count > 0).take(8) {
+                        ui.label(format!("  c{}: {} (size {:.2})", cs.label, cs.count, cs.mean_size));
                     }
                     ui.separator();
                     ui.horizontal(|ui| {

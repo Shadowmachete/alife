@@ -150,6 +150,14 @@ pub fn label_continents(mats: &[CellType], sw: u32, sh: u32) -> (Vec<Option<u32>
     (labels, next)
 }
 
+/// Per-continent tally: population and mean body size.
+#[derive(Clone, Debug, PartialEq)]
+pub struct ContinentStat {
+    pub label: u32,
+    pub count: usize,
+    pub mean_size: f32,
+}
+
 /// A snapshot of the living population for the viewer HUD.
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct Stats {
@@ -157,8 +165,8 @@ pub struct Stats {
     pub autotrophs: usize,
     pub predators: usize,
     pub mean_size: f32,
-    /// `(continent_label, population)`, sorted by population desc then label asc.
-    pub continents: Vec<(u32, usize)>,
+    /// Per-continent tally, sorted by population desc then label asc.
+    pub continents: Vec<ContinentStat>,
 }
 
 /// Tally the population: diet split (`diet <= 0.5` = autotroph-leaning), mean
@@ -174,7 +182,8 @@ pub fn compute_stats(
     let total = orgs.len();
     let mut autotrophs = 0usize;
     let mut size_sum = 0.0f32;
-    let mut per = vec![0usize; n_continents as usize];
+    let mut per_count = vec![0usize; n_continents as usize];
+    let mut per_size = vec![0.0f32; n_continents as usize];
     for o in orgs {
         if o.genome.diet <= 0.5 {
             autotrophs += 1;
@@ -182,13 +191,19 @@ pub fn compute_stats(
         size_sum += o.genome.size;
         let idx = (o.pos.y * sw + o.pos.x) as usize;
         if let Some(Some(label)) = labels.get(idx) {
-            per[*label as usize] += 1;
+            per_count[*label as usize] += 1;
+            per_size[*label as usize] += o.genome.size;
         }
     }
     let mean_size = if total > 0 { size_sum / total as f32 } else { 0.0 };
-    let mut continents: Vec<(u32, usize)> =
-        per.iter().enumerate().map(|(l, &c)| (l as u32, c)).collect();
-    continents.sort_by(|a, b| b.1.cmp(&a.1).then(a.0.cmp(&b.0)));
+    let mut continents: Vec<ContinentStat> = (0..n_continents as usize)
+        .map(|l| ContinentStat {
+            label: l as u32,
+            count: per_count[l],
+            mean_size: if per_count[l] > 0 { per_size[l] / per_count[l] as f32 } else { 0.0 },
+        })
+        .collect();
+    continents.sort_by(|a, b| b.count.cmp(&a.count).then(a.label.cmp(&b.label)));
     Stats { total, autotrophs, predators: total - autotrophs, mean_size, continents }
 }
 
@@ -307,6 +322,10 @@ mod tests {
         assert_eq!(s.autotrophs, 2);
         assert_eq!(s.predators, 1);
         assert!((s.mean_size - 0.4).abs() < 1e-6);
-        assert_eq!(s.continents, vec![(0, 2), (1, 1)]);
+        assert_eq!(s.continents.len(), 2);
+        assert_eq!((s.continents[0].label, s.continents[0].count), (0, 2));
+        assert!((s.continents[0].mean_size - 0.3).abs() < 1e-6); // (0.2 + 0.4) / 2
+        assert_eq!((s.continents[1].label, s.continents[1].count), (1, 1));
+        assert!((s.continents[1].mean_size - 0.6).abs() < 1e-6);
     }
 }
