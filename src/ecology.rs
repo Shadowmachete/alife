@@ -312,6 +312,9 @@ pub fn environmental_stress<S: Space>(
     eco: &EcoParams,
 ) {
     for o in pop.organisms_mut() {
+        if o.pos.layer == Layer::Underground {
+            continue; // the Underground is sheltered from seasonal heat/drought
+        }
         let i = space.index(o.pos);
         let heat_excess = (heat.get(i) - o.genome.heat_tolerance).max(0.0);
         let water_need = 1.0 - o.genome.drought_tolerance;
@@ -807,6 +810,26 @@ mod tests {
 
         environmental_stress(&space, &heat, &water, &mut pop, &eco);
         assert_eq!(pop.organisms()[0].energy, 5.0, "tolerant should be unscathed");
+    }
+
+    #[test]
+    fn underground_shelters_from_heat_and_drought() {
+        let space = Grid2p5D::new(1, 1);
+        let eco = EcoParams::default();
+        let mut heat = crate::field::Field::zeros(space.len());
+        let water = crate::field::Field::zeros(space.len());
+        // Scorching, bone-dry on BOTH layers (climate is uniform today).
+        for i in 0..space.len() {
+            heat.set(i, 1.0);
+        }
+        let surf = Coord::new(0, 0, Layer::Surface);
+        let under = Coord::new(0, 0, Layer::Underground);
+        let mut pop = Population::new();
+        pop.spawn(TraitOrganism::new(tol_genome(0.0, 0.0), surf, 5.0)); // intolerant, on top
+        pop.spawn(TraitOrganism::new(tol_genome(0.0, 0.0), under, 5.0)); // intolerant, below
+        environmental_stress(&space, &heat, &water, &mut pop, &eco);
+        assert!(pop.organisms()[0].energy < 5.0, "surface life suffers the heat/drought");
+        assert_eq!(pop.organisms()[1].energy, 5.0, "the Underground is a refuge");
     }
 
     #[test]
