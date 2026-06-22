@@ -34,6 +34,7 @@ const SIM_SEED: u64 = 0xA11FE;
 const BRIDGE_SEED: u64 = 0xB12D6E;
 const HISTORY_CAP: usize = 4000;
 const SAMPLE_EVERY: u32 = 5;
+const CAVE_BACKDROP: u32 = 0x000A_0A12; // dark rock for the Underground view
 
 /// The editable working copy behind the Parameters panel.
 #[derive(Clone)]
@@ -80,6 +81,7 @@ struct TileSim {
     show_valaar: bool,
     show_total: bool,
     continent_visible: Vec<bool>,
+    view_layer: Layer,
 }
 
 impl TileSim {
@@ -164,6 +166,7 @@ fn build_tile_scene(xml: &str, atlas_bytes: &[u8]) -> Scene {
         show_valaar: true,
         show_total: true,
         continent_visible: vec![true; n_continents as usize],
+        view_layer: Layer::Surface,
     };
     t.reseed();
     Scene::Tiles(Box::new(t))
@@ -214,9 +217,13 @@ fn framed_camera(mw: u32, mh: u32, vw: usize, vh: usize) -> Camera {
 fn render_terrain(scene: &Scene, cam: &Camera, vw: u32, vh: u32, buf: &mut [u32]) {
     match scene {
         Scene::Tiles(t) => {
-            // Half-tile offset: autotiled tiles are a dual grid; shift +½ cell.
-            let tile_cam = Camera { cx: cam.cx + 0.5, cy: cam.cy + 0.5, zoom: cam.zoom };
-            render_tiles_to_buffer(&t.map, &t.atlas, &tile_cam, vw, vh, buf);
+            if t.view_layer == Layer::Underground {
+                buf.iter_mut().for_each(|p| *p = CAVE_BACKDROP);
+            } else {
+                // Half-tile offset: autotiled tiles are a dual grid; shift +½ cell.
+                let tile_cam = Camera { cx: cam.cx + 0.5, cy: cam.cy + 0.5, zoom: cam.zoom };
+                render_tiles_to_buffer(&t.map, &t.atlas, &tile_cam, vw, vh, buf);
+            }
         }
         Scene::Terrain { map, space, layer } => {
             render_to_buffer(map, space, *layer, cam, vw, vh, buf);
@@ -297,9 +304,12 @@ fn draw_valaar(painter: &egui::Painter, rect: egui::Rect, cam: &Camera, t: &Tile
 
 /// Draw each organism as an outlined circle inside `rect`: radius scales with
 /// body size and zoom, fill by diet, with a darker ring behind for contrast.
-fn draw_organisms(painter: &egui::Painter, rect: egui::Rect, cam: &Camera, t: &TileSim) {
+fn draw_organisms(painter: &egui::Painter, rect: egui::Rect, cam: &Camera, t: &TileSim, layer: Layer) {
     let cell_px = cam.zoom * SIM_SCALE as f32;
     for o in t.sim.pop.organisms() {
+        if o.pos.layer != layer {
+            continue;
+        }
         let wx = (o.pos.x * SIM_SCALE + SIM_SCALE / 2) as f32;
         let wy = (o.pos.y * SIM_SCALE + SIM_SCALE / 2) as f32;
         let sx = rect.min.x + (wx - cam.cx) * cam.zoom;
@@ -427,6 +437,18 @@ impl eframe::App for MapApp {
                         }
                         if ui.button("Reseed").clicked() {
                             t.reseed();
+                        }
+                    });
+                    ui.horizontal(|ui| {
+                        let label = match t.view_layer {
+                            Layer::Surface => "Flip to underground",
+                            Layer::Underground => "Flip to surface",
+                        };
+                        if ui.button(label).clicked() {
+                            t.view_layer = match t.view_layer {
+                                Layer::Surface => Layer::Underground,
+                                Layer::Underground => Layer::Surface,
+                            };
                         }
                     });
                     ui.separator();
@@ -560,11 +582,13 @@ impl eframe::App for MapApp {
 
             if let Scene::Tiles(t) = &self.scene {
                 let painter = ui.painter_at(rect); // clip overlays to the map rect
-                draw_bridges(&painter, rect, &self.cam, t);
-                if t.show_valaar {
-                    draw_valaar(&painter, rect, &self.cam, t, Layer::Surface);
+                if t.view_layer == Layer::Surface {
+                    draw_bridges(&painter, rect, &self.cam, t);
                 }
-                draw_organisms(&painter, rect, &self.cam, t);
+                if t.show_valaar {
+                    draw_valaar(&painter, rect, &self.cam, t, t.view_layer);
+                }
+                draw_organisms(&painter, rect, &self.cam, t, t.view_layer);
             }
         });
 
