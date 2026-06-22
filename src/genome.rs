@@ -5,7 +5,7 @@
 use crate::rng::Rng;
 
 /// Number of scalar traits in the genome.
-pub const TRAIT_COUNT: usize = 9;
+pub const TRAIT_COUNT: usize = 10;
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Genome {
@@ -29,6 +29,9 @@ pub struct Genome {
     /// ability is further gated by the Lamarckian disuse counter on the organism
     /// (see `TraitOrganism::can_swim`).
     pub swim: f32,
+    /// Capacity to descend into the Underground layer at a reservoir access
+    /// column. Genetically "able to dig" when `> 0.5` (see `TraitOrganism::can_dig`).
+    pub dig: f32,
 }
 
 impl Genome {
@@ -43,6 +46,7 @@ impl Genome {
             heat_tolerance: a[6],
             drought_tolerance: a[7],
             swim: a[8],
+            dig: a[9],
         }
     }
 
@@ -57,6 +61,7 @@ impl Genome {
             self.heat_tolerance,
             self.drought_tolerance,
             self.swim,
+            self.dig,
         ]
     }
 
@@ -95,23 +100,31 @@ mod tests {
 
     #[test]
     fn round_trips_through_array() {
-        let g = Genome::from_array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]);
-        assert_eq!(g.to_array(), [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9]);
+        let g = Genome::from_array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.5]);
+        assert_eq!(g.to_array(), [0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.5]);
         assert_eq!(g.diet, 0.4);
         assert_eq!(g.heat_tolerance, 0.7);
         assert_eq!(g.drought_tolerance, 0.8);
     }
 
     #[test]
+    fn dig_round_trips_as_the_tenth_trait() {
+        let g = Genome::from_array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.9, 0.33]);
+        assert_eq!(g.dig, 0.33);
+        assert_eq!(g.to_array()[9], 0.33);
+        assert_eq!(TRAIT_COUNT, 10);
+    }
+
+    #[test]
     fn swim_round_trips_as_the_ninth_trait() {
-        let g = Genome::from_array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.95]);
+        let g = Genome::from_array([0.1, 0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.8, 0.95, 0.5]);
         assert_eq!(g.swim, 0.95);
         assert_eq!(g.to_array()[8], 0.95);
     }
 
     #[test]
     fn clamped_pins_to_unit_interval() {
-        let g = Genome::from_array([-1.0, 2.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 2.0]).clamped();
+        let g = Genome::from_array([-1.0, 2.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 2.0, 0.5]).clamped();
         assert_eq!(g.size, 0.0);
         assert_eq!(g.valaar_efficiency, 1.0);
         assert_eq!(g.speed, 0.5);
@@ -131,7 +144,7 @@ mod tests {
     #[test]
     fn mutate_stays_in_bounds_even_from_extremes() {
         let mut r = Rng::new(5);
-        let g = Genome::from_array([0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 1.0]);
+        let g = Genome::from_array([0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 0.0, 1.0, 1.0, 1.0]);
         for _ in 0..200 {
             let m = g.mutate(&mut r, 0.1);
             for t in m.to_array() {
@@ -143,7 +156,7 @@ mod tests {
     #[test]
     fn mutate_with_zero_rate_is_identity() {
         let mut r = Rng::new(5);
-        let g = Genome::from_array([0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.2, 0.9, 0.5]);
+        let g = Genome::from_array([0.2, 0.3, 0.4, 0.5, 0.6, 0.7, 0.2, 0.9, 0.5, 0.5]);
         assert_eq!(g.mutate(&mut r, 0.0), g);
     }
 }
