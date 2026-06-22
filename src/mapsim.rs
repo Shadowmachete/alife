@@ -208,6 +208,101 @@ pub fn compute_stats(
     Stats { total, autotrophs, predators: total - autotrophs, mean_size, continents }
 }
 
+/// Cluster radius (cells) stamped around each reservoir centre. [D6]
+const RESERVOIR_RADIUS: i32 = 1;
+
+/// Choose the underground reservoir columns: a cluster at the **south-west tip**
+/// of the major (largest) continent and a cluster on the **southmost** other
+/// island. Returns surface-plane `(x, y)` columns (sorted, de-duplicated) to
+/// register as underground sources + descent access points. Pure function of the
+/// continent labels — deterministic, no RNG. [D6]
+pub fn place_underground_reservoirs(sw: u32, sh: u32, labels: &[Option<u32>]) -> Vec<(u32, u32)> {
+    let idx = |x: u32, y: u32| (y * sw + x) as usize;
+    let n = match labels.iter().flatten().max() {
+        Some(&m) => m + 1,
+        None => return Vec::new(),
+    };
+    // Continent sizes + southernmost row reached by each.
+    let mut count = vec![0usize; n as usize];
+    let mut south_y = vec![0u32; n as usize];
+    for y in 0..sh {
+        for x in 0..sw {
+            if let Some(l) = labels[idx(x, y)] {
+                count[l as usize] += 1;
+                south_y[l as usize] = south_y[l as usize].max(y);
+            }
+        }
+    }
+    let major = (0..n as usize).max_by_key(|&l| count[l]).unwrap() as u32;
+    // The southmost non-major island = the other continent reaching the largest y.
+    let mut island: Option<u32> = None;
+    let mut best_south = -1i64;
+    for l in 0..n {
+        if l == major {
+            continue;
+        }
+        if south_y[l as usize] as i64 > best_south {
+            best_south = south_y[l as usize] as i64;
+            island = Some(l);
+        }
+    }
+    // SW tip of the major (max south + west); southmost cell of the island.
+    let mut sw_tip: Option<(u32, u32)> = None;
+    let mut sw_score = i64::MIN;
+    let mut island_cell: Option<(u32, u32)> = None;
+    let mut island_score = i64::MIN;
+    for y in 0..sh {
+        for x in 0..sw {
+            match labels[idx(x, y)] {
+                Some(l) if l == major => {
+                    let s = y as i64 + (sw as i64 - 1 - x as i64);
+                    if s > sw_score {
+                        sw_score = s;
+                        sw_tip = Some((x, y));
+                    }
+                }
+                Some(l) if Some(l) == island => {
+                    let s = y as i64 * sw as i64 - x as i64; // southmost, tie -> westmost
+                    if s > island_score {
+                        island_score = s;
+                        island_cell = Some((x, y));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    let mut cols = Vec::new();
+    for (cx, cy) in [sw_tip, island_cell].into_iter().flatten() {
+        for dy in -RESERVOIR_RADIUS..=RESERVOIR_RADIUS {
+            for dx in -RESERVOIR_RADIUS..=RESERVOIR_RADIUS {
+                let nx = cx as i64 + dx as i64;
+                let ny = cy as i64 + dy as i64;
+                if nx >= 0 && ny >= 0 && (nx as u32) < sw && (ny as u32) < sh {
+                    cols.push((nx as u32, ny as u32));
+                }
+            }
+        }
+    }
+    cols.sort_unstable();
+    cols.dedup();
+    cols
+}
+
+/// Register each reservoir column on the Underground layer: a valaar **source**
+/// (slow injection — the thawing sunken crystal), an **access point** (so valaar
+/// seeps up and diggers may descend), and a **descendable** cell on both layers.
+pub fn add_underground_reservoirs(world: &mut World<Grid2p5D>, cols: &[(u32, u32)]) {
+    let mut desc = vec![false; world.space.len()];
+    for &(x, y) in cols {
+        world.add_source(Coord::new(x, y, Layer::Underground));
+        world.add_access_point(x, y);
+        desc[world.space.index(Coord::new(x, y, Layer::Surface))] = true;
+        desc[world.space.index(Coord::new(x, y, Layer::Underground))] = true;
+    }
+    world.set_descendable(desc);
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -328,5 +423,56 @@ mod tests {
         assert!((s.continents[0].mean_size - 0.3).abs() < 1e-6); // (0.2 + 0.4) / 2
         assert_eq!((s.continents[1].label, s.continents[1].count), (1, 1));
         assert!((s.continents[1].mean_size - 0.6).abs() < 1e-6);
+    }
+
+    #[test]
+    fn reservoirs_sit_at_major_sw_tip_and_southmost_island() {
+        // A big 3x3 continent (top-left) and a one-cell island at the bottom-right.
+        let (w, h, m) = grid(&[
+            "LLLO",
+            "LLLO",
+            "LLLO",
+            "OOOL",
+        ]);
+        let (labels, _n) = label_continents(&m, w, h);
+        let cols = place_underground_reservoirs(w, h, &labels);
+        // SW tip of the major continent is around (0,2); island is the (3,3) cell.
+        assert!(cols.contains(&(0, 2)), "expected a reservoir at the major SW tip, got {cols:?}");
+        assert!(cols.contains(&(3, 3)), "expected a reservoir on the southmost island, got {cols:?}");
+    }
+
+    #[test]
+    fn placement_is_deterministic_and_dedup_sorted() {
+        let (w, h, m) = grid(&["LLLO", "LLLO", "LLLO", "OOOL"]);
+        let (labels, _n) = label_continents(&m, w, h);
+        let a = place_underground_reservoirs(w, h, &labels);
+        let b = place_underground_reservoirs(w, h, &labels);
+        assert_eq!(a, b);
+        let mut sorted = a.clone();
+        sorted.sort_unstable();
+        sorted.dedup();
+        assert_eq!(a, sorted, "columns are sorted + de-duplicated");
+    }
+
+    #[test]
+    fn single_continent_has_no_island_reservoir() {
+        let (w, h, m) = grid(&["LLL", "LLL"]); // one continent, no island
+        let (labels, _n) = label_continents(&m, w, h);
+        let cols = place_underground_reservoirs(w, h, &labels);
+        assert!(!cols.is_empty(), "the major SW tip still gets a reservoir");
+        // Only the SW-tip cluster (around (0,1)); no second far cluster.
+        assert!(cols.iter().all(|&(x, y)| x <= 1 && y <= 1), "clustered at the SW tip, got {cols:?}");
+    }
+
+    #[test]
+    fn add_reservoirs_registers_sources_access_points_and_descendable() {
+        let (w, h, m) = grid(&["LL", "LL"]);
+        let mut world = world_from_materials(w, h, &m);
+        add_underground_reservoirs(&mut world, &[(1, 1)]);
+        assert!(world.sources().contains(&Coord::new(1, 1, Layer::Underground)));
+        assert!(world.access_points().contains(&(1, 1)));
+        let desc = world.descendable().expect("descendable installed");
+        assert!(desc[world.space.index(Coord::new(1, 1, Layer::Surface))]);
+        assert!(desc[world.space.index(Coord::new(1, 1, Layer::Underground))]);
     }
 }
