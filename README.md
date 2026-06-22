@@ -51,7 +51,10 @@ heterogeneity, trade-offs, isolation→speciation, trophic levels, disturbance).
 | 2 | Organisms + ecology — trait-vector genome, energy economy, implicit selection | ✅ done |
 | 3 | Climate + the 6-arh seasons — heat/water fields, tolerance genes, seasonal stress | ✅ done |
 | 4 | Static geography — terrain map (cell type + valaar conductivity + passability), sketch-driven generator, interactive map viewer | ✅ done |
-| 5+ | Terrain-aware ecology (oceans as barriers → speciation), dynamic geography, the valaar state-machine, the natural-history/timeline layer | 🔮 future |
+| 5 | Terrain-aware ecology (oceans as barriers → speciation), swimming, periodic land bridges, the valaar state-machine | ✅ done |
+| 5d | Valaar phase overlay — the field made visible (amount→opacity, phase→hue, crystal tint) | ✅ done |
+| 6 | Subterranean refuge — `dig` gene + underground valaar reservoirs (the crystalline sink) + underground-view flip | ✅ done |
+| 7+ | The natural-history / timeline layer | 🔮 future |
 
 Plans live in `docs/plans/`. Organisms sit behind a clade-agnostic `Organism`
 trait (`TraitOrganism` is the first clade), so richer models (neural brains,
