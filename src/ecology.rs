@@ -12,7 +12,7 @@ use crate::params::EcoParams;
 use crate::population::Population;
 use crate::rng::Rng;
 use crate::season::Season;
-use crate::space::{Coord, Space};
+use crate::space::{Coord, Layer, Space};
 
 /// Autotrophy: each organism with an autotroph fraction `(1 - diet)` draws
 /// valaar from the cell it stands in, scaled by `valaar_efficiency`, capped by
@@ -119,7 +119,11 @@ fn tunnel_exit<S: Space>(
 /// cell is walkable only where `passable[index]`. A **tunneller** (`can_swim`)
 /// may additionally *teleport straight through* a contiguous band of `swimmable`
 /// (Valaar) cells to the first walkable land cell on the far side, paying an
-/// extra `valaar_drain` per Valaar cell crossed. Neighbours never cross layers.
+/// extra `valaar_drain` per Valaar cell crossed. A **digger** (`can_dig`) at a
+/// `descendable` access column may instead switch to the same `(x, y)` on the
+/// other layer if it holds more valaar, paying an extra `dig_drain`. Planar
+/// neighbours never cross layers; only the digger's vertical move does.
+#[allow(clippy::too_many_arguments)] // the move candidates each need their own mask
 pub fn move_organisms<S: Space>(
     space: &S,
     field: &Field,
@@ -128,6 +132,7 @@ pub fn move_organisms<S: Space>(
     rng: &mut Rng,
     passable: Option<&[bool]>,
     swimmable: Option<&[bool]>,
+    descendable: Option<&[bool]>,
 ) {
     for o in pop.organisms_mut() {
         // Draw first so the rng stream advances once per organism regardless.
@@ -137,6 +142,7 @@ pub fn move_organisms<S: Space>(
         let mut best = o.pos;
         let mut best_v = field.get(space.index(o.pos));
         let mut best_width = 0u32; // Valaar cells crossed to reach `best` (0 = a walk)
+        let mut best_descend = false; // whether `best` is reached by switching layers
         // Walkable planar neighbours (ordinary gradient ascent).
         for n in space.planar_neighbors(o.pos) {
             let ni = space.index(n);
@@ -167,10 +173,40 @@ pub fn move_organisms<S: Space>(
                 }
             }
         }
+        // Diggers can switch layers at a descendable access column, choosing the
+        // other-layer cell if it holds more valaar (descend to a reservoir, or
+        // resurface when the surface recovers).
+        if o.can_dig() {
+            let here_descendable = matches!(descendable, Some(m) if m[space.index(o.pos)]);
+            if here_descendable {
+                let other_layer = match o.pos.layer {
+                    Layer::Surface => Layer::Underground,
+                    Layer::Underground => Layer::Surface,
+                };
+                let other = Coord::new(o.pos.x, o.pos.y, other_layer);
+                let oi = space.index(other);
+                let open = match passable {
+                    Some(m) => m[oi],
+                    None => true,
+                };
+                if open {
+                    let v = field.get(oi);
+                    if v > best_v {
+                        best_v = v;
+                        best = other;
+                        best_width = 0;
+                        best_descend = true;
+                    }
+                }
+            }
+        }
         if best != o.pos {
             o.pos = best;
             o.energy -= eco.move_cost * o.genome.speed;
             o.energy -= eco.valaar_drain * best_width as f32; // 0 for a plain walk
+            if best_descend {
+                o.energy -= eco.dig_drain;
+            }
         }
     }
 }
@@ -410,7 +446,7 @@ mod tests {
         // speed 1.0 => always moves.
         pop.spawn(TraitOrganism::new(Genome::from_array([0.5, 1.0, 1.0, 0.0, 0.9, 0.5, 0.5, 0.5, 0.5, 0.5]), start, 5.0));
         let mut rng = Rng::new(1);
-        move_organisms(&space, &field, &mut pop, &eco, &mut rng, None, None);
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng, None, None, None);
         assert_eq!(pop.organisms()[0].pos, Coord::new(2, 0, Layer::Surface));
         assert!(pop.organisms()[0].energy < 5.0, "moving costs energy");
     }
@@ -425,7 +461,7 @@ mod tests {
         let mut pop = Population::new();
         pop.spawn(TraitOrganism::new(Genome::from_array([0.5, 1.0, 1.0, 0.0, 0.9, 0.5, 0.5, 0.5, 0.5, 0.5]), peak, 5.0));
         let mut rng = Rng::new(1);
-        move_organisms(&space, &field, &mut pop, &eco, &mut rng, None, None);
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng, None, None, None);
         assert_eq!(pop.organisms()[0].pos, peak);
         assert_eq!(pop.organisms()[0].energy, 5.0, "no move, no cost");
     }
@@ -448,7 +484,7 @@ mod tests {
             5.0,
         ));
         let mut rng = Rng::new(1);
-        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&mask), None);
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&mask), None, None);
         assert_eq!(pop.organisms()[0].pos, start, "must not enter an impassable cell");
     }
 
@@ -471,7 +507,7 @@ mod tests {
             5.0,
         ));
         let mut rng = Rng::new(1);
-        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&mask), None);
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&mask), None, None);
         assert_eq!(pop.organisms()[0].pos, center);
         assert_eq!(pop.organisms()[0].energy, 5.0, "no move, no cost");
     }
@@ -506,7 +542,7 @@ mod tests {
         let mut pop = Population::new();
         pop.spawn(TraitOrganism::new(swimmer(0.9), start, 5.0));
         let mut rng = Rng::new(1);
-        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&passable), Some(&swimmable));
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&passable), Some(&swimmable), None);
         assert_eq!(
             pop.organisms()[0].pos,
             Coord::new(3, 0, Layer::Surface),
@@ -527,7 +563,7 @@ mod tests {
         let mut pop = Population::new();
         pop.spawn(TraitOrganism::new(swimmer(0.1), start, 5.0)); // gene below threshold
         let mut rng = Rng::new(1);
-        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&passable), Some(&swimmable));
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&passable), Some(&swimmable), None);
         assert_eq!(pop.organisms()[0].pos, start, "a non-tunneller is stuck on its bank");
     }
 
@@ -539,7 +575,7 @@ mod tests {
         let mut pop = Population::new();
         pop.spawn(TraitOrganism::new(swimmer(0.9), start, 5.0));
         let mut rng = Rng::new(1);
-        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&passable), Some(&swimmable));
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&passable), Some(&swimmable), None);
         assert_eq!(pop.organisms()[0].pos, start, "no incentive to cross to a poorer bank");
     }
 
@@ -563,8 +599,76 @@ mod tests {
         let mut pop = Population::new();
         pop.spawn(TraitOrganism::new(swimmer(0.9), start, 5.0));
         let mut rng = Rng::new(1);
-        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&passable), Some(&swimmable));
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&passable), Some(&swimmable), None);
         assert_eq!(pop.organisms()[0].pos, start, "cannot tunnel into a non-land far side");
+    }
+
+    fn digger(dig: f32) -> Genome {
+        // speed 1.0 so it always acts; diet 0 autotroph.
+        Genome::from_array([0.5, 1.0, 1.0, 0.0, 0.9, 0.5, 0.5, 0.5, 0.5, dig])
+    }
+
+    /// surface(idx0) over a rich underground reservoir(idx1); both descendable.
+    fn shaft(under: f32) -> (Grid2p5D, crate::field::Field, Vec<bool>, Vec<bool>) {
+        let space = Grid2p5D::new(1, 1);
+        let mut field = crate::field::Field::zeros(space.len());
+        field.set(space.index(Coord::new(0, 0, Layer::Underground)), under);
+        let passable = vec![true; space.len()];
+        let descendable = vec![true; space.len()];
+        (space, field, passable, descendable)
+    }
+
+    #[test]
+    fn digger_descends_toward_a_rich_reservoir() {
+        let (space, field, passable, descendable) = shaft(9.0);
+        let eco = EcoParams::default();
+        let start = Coord::new(0, 0, Layer::Surface);
+        let mut pop = Population::new();
+        pop.spawn(TraitOrganism::new(digger(0.9), start, 5.0));
+        let mut rng = Rng::new(1);
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&passable), None, Some(&descendable));
+        assert_eq!(pop.organisms()[0].pos, Coord::new(0, 0, Layer::Underground));
+        let expected = 5.0 - eco.move_cost - eco.dig_drain;
+        assert!((pop.organisms()[0].energy - expected).abs() < 1e-6, "pays move + dig_drain");
+    }
+
+    #[test]
+    fn non_digger_cannot_descend() {
+        let (space, field, passable, descendable) = shaft(9.0);
+        let eco = EcoParams::default();
+        let start = Coord::new(0, 0, Layer::Surface);
+        let mut pop = Population::new();
+        pop.spawn(TraitOrganism::new(digger(0.1), start, 5.0)); // gene below threshold
+        let mut rng = Rng::new(1);
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&passable), None, Some(&descendable));
+        assert_eq!(pop.organisms()[0].pos, start);
+    }
+
+    #[test]
+    fn digger_stays_without_a_descendable_column() {
+        let (space, field, passable, _descendable) = shaft(9.0);
+        let eco = EcoParams::default();
+        let start = Coord::new(0, 0, Layer::Surface);
+        let mut pop = Population::new();
+        pop.spawn(TraitOrganism::new(digger(0.9), start, 5.0));
+        let mut rng = Rng::new(1);
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&passable), None, None);
+        assert_eq!(pop.organisms()[0].pos, start, "no descendable mask -> no descent");
+    }
+
+    #[test]
+    fn digger_ascends_when_the_surface_is_richer() {
+        let space = Grid2p5D::new(1, 1);
+        let mut field = crate::field::Field::zeros(space.len());
+        field.set(space.index(Coord::new(0, 0, Layer::Surface)), 9.0); // surface richer
+        let passable = vec![true; space.len()];
+        let descendable = vec![true; space.len()];
+        let eco = EcoParams::default();
+        let mut pop = Population::new();
+        pop.spawn(TraitOrganism::new(digger(0.9), Coord::new(0, 0, Layer::Underground), 5.0));
+        let mut rng = Rng::new(1);
+        move_organisms(&space, &field, &mut pop, &eco, &mut rng, Some(&passable), None, Some(&descendable));
+        assert_eq!(pop.organisms()[0].pos, Coord::new(0, 0, Layer::Surface));
     }
 
     // [size, eff, speed, diet, repro_threshold, lifespan, heat_tol, drought_tol]
