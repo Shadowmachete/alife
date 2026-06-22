@@ -17,6 +17,9 @@ use crate::space::Coord;
 /// Genetic threshold above which an organism is *able* to swim.
 const SWIM_THRESHOLD: f32 = 0.5;
 
+/// Genetic threshold above which an organism is *able* to dig (descend).
+const DIG_THRESHOLD: f32 = 0.5;
+
 /// What every organism — of any clade — must provide. Deliberately general:
 /// only the shared lifecycle, never a genome representation.
 pub trait Organism {
@@ -72,6 +75,12 @@ impl TraitOrganism {
     /// (Darwinian): able iff `genome.swim > SWIM_THRESHOLD`.
     pub fn can_swim(&self) -> bool {
         self.genome.swim > SWIM_THRESHOLD
+    }
+
+    /// Whether this organism can descend into the Underground at a reservoir
+    /// access column. Purely genetic (Darwinian): able iff `genome.dig > DIG_THRESHOLD`.
+    pub fn can_dig(&self) -> bool {
+        self.genome.dig > DIG_THRESHOLD
     }
 }
 
@@ -182,5 +191,16 @@ mod tests {
         let pos = Coord::new(0, 0, Layer::Surface);
         assert!(TraitOrganism::new(swim_genome(0.9), pos, 1.0).can_swim());
         assert!(!TraitOrganism::new(swim_genome(0.4), pos, 1.0).can_swim());
+    }
+
+    fn dig_genome(dig: f32) -> Genome {
+        Genome::from_array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, dig])
+    }
+
+    #[test]
+    fn can_dig_requires_gene_above_threshold() {
+        let pos = Coord::new(0, 0, Layer::Surface);
+        assert!(TraitOrganism::new(dig_genome(0.9), pos, 1.0).can_dig());
+        assert!(!TraitOrganism::new(dig_genome(0.4), pos, 1.0).can_dig());
     }
 }
