@@ -5,7 +5,8 @@
 //! Usage: `cargo run --release --bin mapview [map]` (default alife_map_blended.tmx).
 
 use alife::mapsim::{
-    compute_stats, downscale, label_continents, marker_color, seed_on_fed_land, world_from_materials,
+    add_underground_reservoirs, compute_stats, downscale, label_continents, marker_color,
+    place_underground_reservoirs, seed_on_fed_land, world_from_materials,
 };
 use alife::bridges::{find_bridge_sites, open_bridge_cells, BridgeConfig, Bridges};
 use alife::params::EcoParams;
@@ -126,6 +127,8 @@ fn build_sim(
     let mut world = world_from_materials(sw, sh, mats);
     world.params.diffuse_rate = tun.diffuse_rate;
     world.params.decay = tun.decay;
+    let reservoirs = place_underground_reservoirs(sw, sh, continents);
+    add_underground_reservoirs(&mut world, &reservoirs);
     let mut sim = Sim::new(world, tun.eco, SIM_SEED);
     let sites = find_bridge_sites(mats, sw, sh, continents, &mut Rng::new(BRIDGE_SEED), &tun.bridges);
     sim.set_bridges(Bridges::new(sites, tun.bridges, BRIDGE_SEED));
