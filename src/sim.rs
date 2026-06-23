@@ -149,6 +149,7 @@ impl<S: Space> Sim<S> {
         );
         ecology::predate(&self.world.space, &mut self.pop, &self.eco);
         ecology::environmental_stress(&self.world.space, &self.heat, &self.water, &mut self.pop, &self.eco);
+        ecology::substitute_feed(&self.world.space, &self.heat, &self.water, &mut self.pop, &self.eco);
         ecology::metabolize(&mut self.pop, &self.eco);
         ecology::cull_and_recycle(&self.world.space, &mut self.world.valaar, &mut self.pop, &self.eco);
         ecology::reproduce(&mut self.pop, &self.eco, &mut self.rng, season);
@@ -218,5 +219,35 @@ mod tests {
         }
         assert!(max_surface > 0.0, "a Vraze quake pulsed valaar to the surface");
         let _ = ui; // underground accumulates between quakes
+    }
+
+    #[test]
+    fn a_generalist_outlasts_a_specialist_in_a_warm_valaar_desert() {
+        use crate::genome::Genome;
+        use crate::space::{Coord, Layer};
+
+        // No valaar anywhere, but a hot surface: only a heat-generalist offsets
+        // upkeep. The two organisms are identical except for valaar_reliance.
+        let world = World::new(Grid2p5D::new(1, 1), Params::default());
+        let mut sim = Sim::new(world, EcoParams::default(), 1);
+        for i in 0..sim.heat.len() {
+            sim.heat.set(i, 1.0);
+        }
+        let at = Coord::new(0, 0, Layer::Surface);
+        // indices 9/10/11 = valaar_reliance / heat_affinity / water_affinity; speed 0.
+        let generalist =
+            Genome::from_array([0.0, 1.0, 0.0, 0.0, 0.9, 1.0, 1.0, 0.5, 0.5, 0.0, 1.0, 0.0]);
+        let specialist =
+            Genome::from_array([0.0, 1.0, 0.0, 0.0, 0.9, 1.0, 1.0, 0.5, 0.5, 1.0, 1.0, 0.0]);
+        sim.seed_organism(TraitOrganism::new(generalist, at, 2.0));
+        sim.seed_organism(TraitOrganism::new(specialist, at, 2.0));
+        let energy = |s: &Sim<Grid2p5D>, idx: usize| s.pop.organisms()[idx].energy;
+        for _ in 0..3 {
+            sim.step();
+        }
+        assert!(
+            energy(&sim, 0) > energy(&sim, 1),
+            "heat-generalist offsets upkeep; specialist does not"
+        );
     }
 }
