@@ -83,16 +83,16 @@ pub fn seed_on_fed_land(
     for _ in 0..n {
         let c = cells[(sim.rng.next_unit() * cells.len() as f32) as usize % cells.len()];
         let g = Genome::from_array([
-            0.45,                          // size
-            0.7,                           // valaar_efficiency
-            0.4,                           // speed
-            sim.rng.next_unit() * 0.4,     // diet (autotroph-leaning)
-            0.5,                           // repro_threshold
-            0.5,                           // lifespan
-            0.5,                           // heat_tolerance
-            0.5,                           // drought_tolerance
-            0.0,                           // swim (arises by mutation)
-            0.0,                           // dig (arises by mutation)
+            0.45,                      // size
+            0.7,                       // valaar_efficiency
+            0.4,                       // speed
+            sim.rng.next_unit() * 0.4, // diet (autotroph-leaning)
+            0.5,                       // repro_threshold
+            0.5,                       // lifespan
+            0.5,                       // heat_tolerance
+            0.5,                       // drought_tolerance
+            0.0,                       // swim (arises by mutation)
+            0.0,                       // dig (arises by mutation)
         ])
         .clamped();
         let energy = sim.eco.initial_energy;
@@ -196,26 +196,121 @@ pub fn compute_stats(
             per_size[*label as usize] += o.genome.size;
         }
     }
-    let mean_size = if total > 0 { size_sum / total as f32 } else { 0.0 };
+    let mean_size = if total > 0 {
+        size_sum / total as f32
+    } else {
+        0.0
+    };
     let mut continents: Vec<ContinentStat> = (0..n_continents as usize)
         .map(|l| ContinentStat {
             label: l as u32,
             count: per_count[l],
-            mean_size: if per_count[l] > 0 { per_size[l] / per_count[l] as f32 } else { 0.0 },
+            mean_size: if per_count[l] > 0 {
+                per_size[l] / per_count[l] as f32
+            } else {
+                0.0
+            },
         })
         .collect();
     continents.sort_by(|a, b| b.count.cmp(&a.count).then(a.label.cmp(&b.label)));
-    Stats { total, autotrophs, predators: total - autotrophs, mean_size, continents }
+    Stats {
+        total,
+        autotrophs,
+        predators: total - autotrophs,
+        mean_size,
+        continents,
+    }
 }
 
-/// Cluster radius (cells) stamped around each reservoir centre. [D6]
-const RESERVOIR_RADIUS: i32 = 1;
+/// Sparse (north) edge stride of a reservoir gradient region — one column per
+/// this many cells where the gradient begins. [D6]
+const RESERVOIR_MAX_STRIDE: i64 = 8;
+/// Dense (south) edge stride. `1` lines the southmost row solidly. [D6]
+const RESERVOIR_MIN_STRIDE: i64 = 3;
+/// Fraction of a continent's latitude span (measured from the south) the
+/// reservoir gradient covers; the northern remainder stays empty. [D6]
+const RESERVOIR_BAND_FRAC: f32 = 0.5;
 
-/// Choose the underground reservoir columns: a cluster at the **south-west tip**
-/// of the major (largest) continent and a cluster on the **southmost** other
-/// island. Returns surface-plane `(x, y)` columns (sorted, de-duplicated) to
-/// register as underground sources + descent access points. Pure function of the
-/// continent labels — deterministic, no RNG. [D6]
+/// The southmost cell of continent `target` (ties broken to the **west**), or
+/// `None` if the label is absent. Guarantees the southern tip always holds a
+/// reservoir even when the gradient strides skip the exact corner. [D6]
+fn south_tip(sw: u32, sh: u32, labels: &[Option<u32>], target: u32) -> Option<(u32, u32)> {
+    let idx = |x: u32, y: u32| (y * sw + x) as usize;
+    let mut best: Option<(u32, u32)> = None;
+    let mut score = i64::MIN;
+    for y in 0..sh {
+        for x in 0..sw {
+            if labels[idx(x, y)] == Some(target) {
+                let s = y as i64 * sw as i64 - x as i64; // southmost, tie -> westmost
+                if s > score {
+                    score = s;
+                    best = Some((x, y));
+                }
+            }
+        }
+    }
+    best
+}
+
+/// Scatter reservoir columns over continent `target`'s **southern band** as a
+/// south-ward density gradient: sparse at the band's north edge, dense (the full
+/// row) at the south. `west_only` confines the spread to the continent's western
+/// half — the major continent's south-west quadrant. Deterministic, no RNG. [D6]
+fn gradient_columns(
+    sw: u32,
+    sh: u32,
+    labels: &[Option<u32>],
+    target: u32,
+    west_only: bool,
+) -> Vec<(u32, u32)> {
+    let idx = |x: u32, y: u32| (y * sw + x) as usize;
+    let (mut x_min, mut x_max) = (u32::MAX, 0u32);
+    let (mut y_min, mut y_max) = (u32::MAX, 0u32);
+    let mut any = false;
+    for y in 0..sh {
+        for x in 0..sw {
+            if labels[idx(x, y)] == Some(target) {
+                any = true;
+                x_min = x_min.min(x);
+                x_max = x_max.max(x);
+                y_min = y_min.min(y);
+                y_max = y_max.max(y);
+            }
+        }
+    }
+    let mut cols = Vec::new();
+    if !any {
+        return cols;
+    }
+    let span = (y_max - y_min) as f32;
+    let y_top = y_max - (span * RESERVOIR_BAND_FRAC).round() as u32;
+    let x_limit = if west_only {
+        x_min + (x_max - x_min) / 2
+    } else {
+        x_max
+    };
+    let denom = (y_max - y_top).max(1) as f32;
+    for y in y_top..=y_max {
+        let t = (y - y_top) as f32 / denom; // 0 at the band's north, 1 at the south edge
+        let stride = (RESERVOIR_MAX_STRIDE as f32
+            + (RESERVOIR_MIN_STRIDE - RESERVOIR_MAX_STRIDE) as f32 * t)
+            .round()
+            .max(1.0) as u32;
+        for x in x_min..=x_limit {
+            if labels[idx(x, y)] == Some(target) && (x - x_min) % stride == 0 {
+                cols.push((x, y));
+            }
+        }
+    }
+    cols
+}
+
+/// Choose the underground reservoir columns: a south-ward density **gradient**
+/// over the **south-west quadrant** of the major (largest) continent and a
+/// full-width gradient over the **southmost** other island — sparse to the north,
+/// dense at each southern tip. Returns surface-plane `(x, y)` columns (sorted,
+/// de-duplicated) to register as underground sources + descent access points.
+/// Pure function of the continent labels — deterministic, no RNG. [D6]
 pub fn place_underground_reservoirs(sw: u32, sh: u32, labels: &[Option<u32>]) -> Vec<(u32, u32)> {
     let idx = |x: u32, y: u32| (y * sw + x) as usize;
     let n = match labels.iter().flatten().max() {
@@ -246,43 +341,14 @@ pub fn place_underground_reservoirs(sw: u32, sh: u32, labels: &[Option<u32>]) ->
             island = Some(l);
         }
     }
-    // SW tip of the major (max south + west); southmost cell of the island.
-    let mut sw_tip: Option<(u32, u32)> = None;
-    let mut sw_score = i64::MIN;
-    let mut island_cell: Option<(u32, u32)> = None;
-    let mut island_score = i64::MIN;
-    for y in 0..sh {
-        for x in 0..sw {
-            match labels[idx(x, y)] {
-                Some(l) if l == major => {
-                    let s = y as i64 + (sw as i64 - 1 - x as i64);
-                    if s > sw_score {
-                        sw_score = s;
-                        sw_tip = Some((x, y));
-                    }
-                }
-                Some(l) if Some(l) == island => {
-                    let s = y as i64 * sw as i64 - x as i64; // southmost, tie -> westmost
-                    if s > island_score {
-                        island_score = s;
-                        island_cell = Some((x, y));
-                    }
-                }
-                _ => {}
-            }
-        }
-    }
     let mut cols = Vec::new();
-    for (cx, cy) in [sw_tip, island_cell].into_iter().flatten() {
-        for dy in -RESERVOIR_RADIUS..=RESERVOIR_RADIUS {
-            for dx in -RESERVOIR_RADIUS..=RESERVOIR_RADIUS {
-                let nx = cx as i64 + dx as i64;
-                let ny = cy as i64 + dy as i64;
-                if nx >= 0 && ny >= 0 && (nx as u32) < sw && (ny as u32) < sh {
-                    cols.push((nx as u32, ny as u32));
-                }
-            }
-        }
+    // Major continent: a south-west-quadrant gradient + a guaranteed tip.
+    cols.extend(gradient_columns(sw, sh, labels, major, true));
+    cols.extend(south_tip(sw, sh, labels, major));
+    // Southmost island (if any): a full-width gradient + a guaranteed tip.
+    if let Some(isl) = island {
+        cols.extend(gradient_columns(sw, sh, labels, isl, false));
+        cols.extend(south_tip(sw, sh, labels, isl));
     }
     cols.sort_unstable();
     cols.dedup();
@@ -324,6 +390,21 @@ mod tests {
         (w, h, m)
     }
 
+    /// Two stacked all-land continents separated by `gap` ocean rows: a `top_h`
+    /// continent (label 0) and a `bottom_h` island (label 1) to its south.
+    /// Returns `(w, h, labels)`.
+    fn two_continents(w: u32, top_h: u32, gap: u32, bottom_h: u32) -> (u32, u32, Vec<Option<u32>>) {
+        let h = top_h + gap + bottom_h;
+        let mut m = vec![CellType::Land; (w * h) as usize];
+        for y in top_h..top_h + gap {
+            for x in 0..w {
+                m[(y * w + x) as usize] = CellType::Ocean;
+            }
+        }
+        let (labels, _n) = label_continents(&m, w, h);
+        (w, h, labels)
+    }
+
     #[test]
     fn downscale_centre_samples() {
         // 6×3 -> scale 3 -> 2×1; centre of each 3×3 block is (col 1, row 1) / (col 4, row 1)
@@ -351,7 +432,11 @@ mod tests {
         let seeded = seed_on_fed_land(&mut sim, &m, 10, 0.001);
         assert_eq!(seeded, 10);
         for o in sim.pop.organisms() {
-            assert_eq!(o.pos, Coord::new(1, 0, Layer::Surface), "only the land cell is fed");
+            assert_eq!(
+                o.pos,
+                Coord::new(1, 0, Layer::Surface),
+                "only the land cell is fed"
+            );
         }
     }
 
@@ -381,9 +466,15 @@ mod tests {
     fn marker_color_greens_autotrophs_reds_predators() {
         let c = Coord::new(0, 0, Layer::Surface);
         let auto = TraitOrganism::new(
-            Genome::from_array([0.5, 0.5, 0.5, 0.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]), c, 1.0);
+            Genome::from_array([0.5, 0.5, 0.5, 0.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]),
+            c,
+            1.0,
+        );
         let pred = TraitOrganism::new(
-            Genome::from_array([0.5, 0.5, 0.5, 1.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]), c, 1.0);
+            Genome::from_array([0.5, 0.5, 0.5, 1.0, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5]),
+            c,
+            1.0,
+        );
         let green = |p: u32| (p >> 8) & 0xFF;
         let red = |p: u32| (p >> 16) & 0xFF;
         assert!(green(marker_color(&auto)) > red(marker_color(&auto)));
@@ -409,9 +500,21 @@ mod tests {
         let g = |diet: f32, size: f32| {
             Genome::from_array([size, 0.5, 0.5, diet, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5])
         };
-        pop.spawn(TraitOrganism::new(g(0.0, 0.2), Coord::new(0, 0, Layer::Surface), 1.0));
-        pop.spawn(TraitOrganism::new(g(0.0, 0.4), Coord::new(0, 0, Layer::Surface), 1.0));
-        pop.spawn(TraitOrganism::new(g(1.0, 0.6), Coord::new(2, 0, Layer::Surface), 1.0));
+        pop.spawn(TraitOrganism::new(
+            g(0.0, 0.2),
+            Coord::new(0, 0, Layer::Surface),
+            1.0,
+        ));
+        pop.spawn(TraitOrganism::new(
+            g(0.0, 0.4),
+            Coord::new(0, 0, Layer::Surface),
+            1.0,
+        ));
+        pop.spawn(TraitOrganism::new(
+            g(1.0, 0.6),
+            Coord::new(2, 0, Layer::Surface),
+            1.0,
+        ));
 
         let s = compute_stats(&pop, w, &labels, n);
         assert_eq!(s.total, 3);
@@ -428,17 +531,18 @@ mod tests {
     #[test]
     fn reservoirs_sit_at_major_sw_tip_and_southmost_island() {
         // A big 3x3 continent (top-left) and a one-cell island at the bottom-right.
-        let (w, h, m) = grid(&[
-            "LLLO",
-            "LLLO",
-            "LLLO",
-            "OOOL",
-        ]);
+        let (w, h, m) = grid(&["LLLO", "LLLO", "LLLO", "OOOL"]);
         let (labels, _n) = label_continents(&m, w, h);
         let cols = place_underground_reservoirs(w, h, &labels);
         // SW tip of the major continent is around (0,2); island is the (3,3) cell.
-        assert!(cols.contains(&(0, 2)), "expected a reservoir at the major SW tip, got {cols:?}");
-        assert!(cols.contains(&(3, 3)), "expected a reservoir on the southmost island, got {cols:?}");
+        assert!(
+            cols.contains(&(0, 2)),
+            "expected a reservoir at the major SW tip, got {cols:?}"
+        );
+        assert!(
+            cols.contains(&(3, 3)),
+            "expected a reservoir on the southmost island, got {cols:?}"
+        );
     }
 
     #[test]
@@ -461,7 +565,93 @@ mod tests {
         let cols = place_underground_reservoirs(w, h, &labels);
         assert!(!cols.is_empty(), "the major SW tip still gets a reservoir");
         // Only the SW-tip cluster (around (0,1)); no second far cluster.
-        assert!(cols.iter().all(|&(x, y)| x <= 1 && y <= 1), "clustered at the SW tip, got {cols:?}");
+        assert!(
+            cols.iter().all(|&(x, y)| x <= 1 && y <= 1),
+            "clustered at the SW tip, got {cols:?}"
+        );
+    }
+
+    #[test]
+    fn reservoirs_spread_across_the_south_not_one_blob() {
+        let (w, h) = (12u32, 12u32);
+        let labels = vec![Some(0u32); (w * h) as usize];
+        let cols = place_underground_reservoirs(w, h, &labels);
+        let xs: Vec<u32> = cols.iter().map(|c| c.0).collect();
+        let ys: Vec<u32> = cols.iter().map(|c| c.1).collect();
+        let span_x = xs.iter().max().unwrap() - xs.iter().min().unwrap();
+        let span_y = ys.iter().max().unwrap() - ys.iter().min().unwrap();
+        assert!(
+            span_x > 2 && span_y > 2,
+            "reservoirs should spread out, not sit in one 3x3 blob: {cols:?}"
+        );
+        assert!(
+            cols.len() >= 8,
+            "expected many reservoirs, got {}: {cols:?}",
+            cols.len()
+        );
+    }
+
+    #[test]
+    fn reservoir_density_increases_toward_the_south() {
+        let (w, h) = (12u32, 12u32);
+        let labels = vec![Some(0u32); (w * h) as usize];
+        let cols = place_underground_reservoirs(w, h, &labels);
+        let mut rows: Vec<u32> = cols.iter().map(|c| c.1).collect();
+        rows.sort_unstable();
+        rows.dedup();
+        assert!(
+            rows.len() > 2,
+            "reservoirs should occupy a gradient of rows, got {rows:?}"
+        );
+        let (north_edge, south_edge) = (*rows.first().unwrap(), *rows.last().unwrap());
+        let at = |row: u32| cols.iter().filter(|c| c.1 == row).count();
+        assert!(
+            at(south_edge) > at(north_edge),
+            "south edge (row {south_edge}) should be denser than the north edge (row {north_edge}): {cols:?}"
+        );
+    }
+
+    #[test]
+    fn major_continent_reservoirs_fill_the_south_west_quadrant() {
+        let (w, h) = (12u32, 12u32);
+        let labels = vec![Some(0u32); (w * h) as usize];
+        let cols = place_underground_reservoirs(w, h, &labels);
+        assert!(
+            cols.iter()
+                .all(|&(x, y)| x <= w / 2 && y as i32 >= h as i32 / 2 - 1),
+            "reservoirs should stay in the south-west quadrant: {cols:?}"
+        );
+        let min_y = cols.iter().map(|c| c.1).min().unwrap();
+        assert!(
+            min_y <= h / 2 + 1,
+            "reservoirs should reach the north of the region, min_y={min_y}"
+        );
+    }
+
+    #[test]
+    fn island_reservoirs_spread_with_a_dense_south_tip() {
+        // Major continent (12 rows), an ocean divider, then an 8-row island.
+        let (w, h, labels) = two_continents(10, 12, 1, 8);
+        let island_start = 12 + 1; // first land row of the island
+        let cols = place_underground_reservoirs(w, h, &labels);
+        let island: Vec<(u32, u32)> = cols.into_iter().filter(|c| c.1 >= island_start).collect();
+        assert!(
+            island.len() >= 6,
+            "island should hold many reservoirs, got {}: {island:?}",
+            island.len()
+        );
+        let xs: Vec<u32> = island.iter().map(|c| c.0).collect();
+        let ys: Vec<u32> = island.iter().map(|c| c.1).collect();
+        let span_x = xs.iter().max().unwrap() - xs.iter().min().unwrap();
+        let span_y = ys.iter().max().unwrap() - ys.iter().min().unwrap();
+        assert!(
+            span_x > 2 && span_y > 2,
+            "island reservoirs should spread, not a blob: {island:?}"
+        );
+        assert!(
+            island.iter().any(|&(_, y)| y == h - 1),
+            "the south tip row should hold reservoirs: {island:?}"
+        );
     }
 
     #[test]
@@ -469,7 +659,9 @@ mod tests {
         let (w, h, m) = grid(&["LL", "LL"]);
         let mut world = world_from_materials(w, h, &m);
         add_underground_reservoirs(&mut world, &[(1, 1)]);
-        assert!(world.sources().contains(&Coord::new(1, 1, Layer::Underground)));
+        assert!(world
+            .sources()
+            .contains(&Coord::new(1, 1, Layer::Underground)));
         assert!(world.access_points().contains(&(1, 1)));
         let desc = world.descendable().expect("descendable installed");
         assert!(desc[world.space.index(Coord::new(1, 1, Layer::Surface))]);
