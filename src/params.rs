@@ -38,6 +38,8 @@ pub struct EcoParams {
     /// Energy a tunneller spends per Valaar cell crossed when it swims through.
     pub valaar_drain: f32,
     /// Energy an organism spends to descend/ascend one layer (the dig cost).
+    /// No longer read by any ecology code; retained so the viewer slider still
+    /// compiles until it is removed in a later task.
     pub dig_drain: f32,
     /// Mutation magnitude multiplier during the Rasgun surge (1.0 = no spike).
     pub rasgun_mutation_mult: f32,
@@ -76,12 +78,6 @@ mod tests {
     fn valaar_drain_default_is_present() {
         let eco = EcoParams::default();
         assert!(eco.valaar_drain > 0.0);
-    }
-
-    #[test]
-    fn dig_drain_default_is_present() {
-        let eco = EcoParams::default();
-        assert!(eco.dig_drain > 0.0);
     }
 
     #[test]

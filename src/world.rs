@@ -48,10 +48,6 @@ pub struct World<S: Space> {
     /// swimming organism may enter despite the cell being impassable in
     /// `passability` (i.e. Valaar). `None` = nothing is swimmable.
     swimmable: Option<Vec<bool>>,
-    /// Per-cell "descendable" mask (sized to `space.len()`): `true` where a
-    /// `can_dig` organism may move to the other layer at the same `(x, y)` (a
-    /// reservoir access column). `None` = nothing descendable.
-    descendable: Option<Vec<bool>>,
 }
 
 impl<S: Space> World<S> {
@@ -67,7 +63,6 @@ impl<S: Space> World<S> {
             access_points: Vec::new(),
             passability: None,
             swimmable: None,
-            descendable: None,
         }
     }
 
@@ -112,18 +107,6 @@ impl<S: Space> World<S> {
     /// The swimmable mask, if one was installed.
     pub fn swimmable(&self) -> Option<&[bool]> {
         self.swimmable.as_deref()
-    }
-
-    /// Install a per-cell descendable mask (`true` = a digger may switch layers
-    /// here). Length must equal `space.len()` (all layers, `Space::index` order).
-    pub fn set_descendable(&mut self, mask: Vec<bool>) {
-        debug_assert_eq!(mask.len(), self.space.len(), "mask must cover every cell");
-        self.descendable = Some(mask);
-    }
-
-    /// The descendable mask, if one was installed.
-    pub fn descendable(&self) -> Option<&[bool]> {
-        self.descendable.as_deref()
     }
 
     /// Flip a single cell's passability (used by dynamic terrain such as land
@@ -228,18 +211,6 @@ mod tests {
         world.set_swimmable(mask);
         assert_eq!(world.swimmable().unwrap().len(), world.space.len());
         assert!(world.swimmable().unwrap()[0]);
-    }
-
-    #[test]
-    fn descendable_defaults_none_and_round_trips() {
-        let space = Grid2p5D::new(2, 2);
-        let mut world = World::new(space, Params::default());
-        assert!(world.descendable().is_none());
-        let mut mask = vec![false; world.space.len()];
-        mask[0] = true;
-        world.set_descendable(mask);
-        assert_eq!(world.descendable().unwrap().len(), world.space.len());
-        assert!(world.descendable().unwrap()[0]);
     }
 
     #[test]

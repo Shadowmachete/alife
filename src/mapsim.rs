@@ -355,18 +355,13 @@ pub fn place_underground_reservoirs(sw: u32, sh: u32, labels: &[Option<u32>]) ->
     cols
 }
 
-/// Register each reservoir column on the Underground layer: a valaar **source**
-/// (slow injection — the thawing sunken crystal), an **access point** (so valaar
-/// seeps up and diggers may descend), and a **descendable** cell on both layers.
+/// Register each reservoir column on the Underground layer as a valaar
+/// **source** (slow injection — the thawing sunken crystal). No access points
+/// or descendable mask: valaar stays below until a quake releases it.
 pub fn add_underground_reservoirs(world: &mut World<Grid2p5D>, cols: &[(u32, u32)]) {
-    let mut desc = vec![false; world.space.len()];
     for &(x, y) in cols {
         world.add_source(Coord::new(x, y, Layer::Underground));
-        world.add_access_point(x, y);
-        desc[world.space.index(Coord::new(x, y, Layer::Surface))] = true;
-        desc[world.space.index(Coord::new(x, y, Layer::Underground))] = true;
     }
-    world.set_descendable(desc);
 }
 
 #[cfg(test)]
@@ -655,16 +650,10 @@ mod tests {
     }
 
     #[test]
-    fn add_reservoirs_registers_sources_access_points_and_descendable() {
-        let (w, h, m) = grid(&["LL", "LL"]);
-        let mut world = world_from_materials(w, h, &m);
+    fn add_reservoirs_registers_underground_sources() {
+        let mut world = World::new(Grid2p5D::new(4, 4), crate::world::Params::default());
         add_underground_reservoirs(&mut world, &[(1, 1)]);
-        assert!(world
-            .sources()
-            .contains(&Coord::new(1, 1, Layer::Underground)));
-        assert!(world.access_points().contains(&(1, 1)));
-        let desc = world.descendable().expect("descendable installed");
-        assert!(desc[world.space.index(Coord::new(1, 1, Layer::Surface))]);
-        assert!(desc[world.space.index(Coord::new(1, 1, Layer::Underground))]);
+        assert_eq!(world.sources(), &[Coord::new(1, 1, Layer::Underground)]);
+        assert!(world.access_points().is_empty());
     }
 }
