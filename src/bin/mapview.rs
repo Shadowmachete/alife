@@ -35,6 +35,9 @@ const BRIDGE_SEED: u64 = 0xB12D6E;
 const HISTORY_CAP: usize = 4000;
 const SAMPLE_EVERY: u32 = 5;
 const CAVE_BACKDROP: u32 = 0x000A_0A12; // dark rock for the Underground view
+// Feature flag: install the underground valaar reservoirs (the crystalline sink)
+// into the live map. Flip to `false` to build the world without them.
+const ENABLE_UNDERGROUND_RESERVOIRS: bool = true;
 
 /// The editable working copy behind the Parameters panel.
 #[derive(Clone)]
@@ -129,8 +132,10 @@ fn build_sim(
     let mut world = world_from_materials(sw, sh, mats);
     world.params.diffuse_rate = tun.diffuse_rate;
     world.params.decay = tun.decay;
-    let reservoirs = place_underground_reservoirs(sw, sh, continents);
-    add_underground_reservoirs(&mut world, &reservoirs);
+    if ENABLE_UNDERGROUND_RESERVOIRS {
+        let reservoirs = place_underground_reservoirs(sw, sh, continents);
+        add_underground_reservoirs(&mut world, &reservoirs);
+    }
     let mut sim = Sim::new(world, tun.eco, SIM_SEED);
     let sites = find_bridge_sites(mats, sw, sh, continents, &mut Rng::new(BRIDGE_SEED), &tun.bridges);
     sim.set_bridges(Bridges::new(sites, tun.bridges, BRIDGE_SEED));
