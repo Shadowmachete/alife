@@ -34,10 +34,17 @@ are the same resource).
   locked *crystal* store that thaws back over later seasons, carrying valaar
   forward in time), and sparse in **Dansch/Laisp**.
 - **Every environmental axis has a matching gene** (you can't adapt to what you
-  can't sense): valaar↔`valaar_efficiency`, heat↔`heat_tolerance`,
-  water↔`drought_tolerance`. A `swim` gene lets life **tunnel straight through** a
-  Valaar river to the far bank (Valaar is impassable to everyone else), paying
-  `valaar_drain` per cell crossed — purely Darwinian, the gene alone decides.
+  can't sense): valaar↔`valaar_efficiency` (how well you extract it) +
+  `valaar_reliance` (how dependent you are on it vs. substitutes),
+  heat↔`heat_tolerance` (resist heat stress) + `heat_affinity` (harvest heat as
+  food), water↔`drought_tolerance` + `water_affinity`. A `swim` gene lets life
+  **tunnel straight through** a Valaar river to the far bank (Valaar is impassable
+  to everyone else), paying `valaar_drain` per cell crossed — purely Darwinian,
+  the gene alone decides.
+- **Surviving the Dusk.** The valaar-poor periphery has two lifelines: organisms
+  can evolve **off** valaar (lower `valaar_reliance` + heat/water affinity, living
+  on ambient warmth/water), and once a year **Vraze earthquakes** crack open the
+  southern **underground reservoirs** and burst their valaar up to the surface.
 
 Full design rationale lives in `docs/` and the idea notes; the engine constraints
 it satisfies are the ones that make genuine emergence possible (spatial
@@ -56,6 +63,7 @@ heterogeneity, trade-offs, isolation→speciation, trophic levels, disturbance).
 | 6 | Subterranean refuge — underground valaar reservoirs (the crystalline sink) + underground-view flip | ✅ done |
 | 6b | Quakes & reservoir pools — the `dig` gene is removed; reservoirs are solid underground pools that **Vraze earthquakes** burst up to the surface (the Dusk's annual valaar pulse) | ✅ done |
 | 7 | Multi-energy — heat/water offset upkeep (thermotrophy/osmotrophy) gated by `valaar_reliance` + `heat_affinity`/`water_affinity`; valaar stays the only path to a surplus | ✅ done |
+| 7b | Population balance — a reproduction cooldown + density-dependent **crowding** give a firm carrying capacity (the population stops climbing as life evolves cheaper) | ✅ done |
 | 8+ | The natural-history / timeline layer | 🔮 future |
 
 Plans live in `docs/plans/`. Organisms sit behind a clade-agnostic `Organism`
@@ -65,8 +73,10 @@ developmental morphology) can drop in later as *new clades*, not rewrites.
 ## Design principles
 
 - **Implicit selection only** — death and birth are consequences, never a score.
-- **Valaar is the one currency** — heat/water are *stress axes* that cost energy,
-  never food.
+- **Valaar is primary** — it is the only path to a reproductive *surplus*.
+  Heat/water are *stress axes* first, but an adapted organism can also **offset
+  its upkeep** by harvesting them (thermotrophy/osmotrophy), capped so substitutes
+  keep it alive without ever paying a surplus — so valaar still governs growth.
 - **Determinism** — identical seed + params ⇒ identical run. One `Rng`, processed
   in a fixed order; no wall-clock or thread nondeterminism.
 - **`std`-only core** — the simulation engine uses no external crates. The map
@@ -110,15 +120,18 @@ python3 tools/png_to_rgba.py     # bake assets/sheet.png -> assets/sheet.rgba (a
 # Open the interactive map viewer (egui): drag to pan, scroll to zoom.
 #   .tmx arg  -> textured live sim (default alife_map_blended.tmx). Organisms are
 #                circles sized by body, coloured by diet (green autotroph -> red
-#                predator), and stay off ocean/valaar. Right panel: population,
-#                diet split, mean size, per-continent counts, and Pause/Reseed.
+#                predator) or — toggle "Colour by reliance" — by valaar_reliance
+#                (valaar-blue specialist -> ochre generalist), and stay off
+#                ocean/valaar. Right panel: population, diet split, mean size,
+#                per-continent counts, and Pause/Reseed.
 #   .json arg -> TerrainMap in solid CellType colours (layer toggle in the panel)
 cargo run --bin mapview [map.tmx | map.json]
 ```
 
 The map viewer has a collapsible **Parameters** panel (every ecology dial tunes
-live; valaar/bridge dials apply on **Reload**, which starts a fresh run on the
-same map) and a **Charts** panel plotting population and mean body-size trends
+live — incl. `substitute_rate`, `repro_cooldown`, `crowd_cost`; valaar/bridge/quake
+dials apply on **Reload**, which starts a fresh run on the same map) and a
+**Charts** panel plotting population and mean body-size trends
 over time — overall and per continent, each series toggleable.
 
 Build the web demo locally (needs [`trunk`](https://trunkrs.dev) + the
@@ -139,14 +152,16 @@ src/
   valaar.rs       valaar dynamics (inject / diffuse / layer-exchange / decay)
   world.rs        World = Space + valaar field + sources/access points
   rng.rs          deterministic PRNG
-  genome.rs       trait-vector genome (9 traits, incl. swim)
+  genome.rs       trait-vector genome (12 traits: body/diet/tolerances + swim + energy genes)
   organism.rs     Organism trait + TraitOrganism (first clade)
   population.rs    organism store + occupancy index
   params.rs       EcoParams — every ecology rate as a dial
-  ecology.rs      tick functions (absorb / move / predate / stress / metabolize / cull / reproduce)
+  ecology.rs      tick functions (absorb / move / predate / stress / substitute_feed / crowding / metabolize / cull / reproduce)
   season.rs       the 6-arh calendar
   climate.rs      season → heat/water targets + field relaxation
   sim.rs          Sim — weaves world + climate + ecology into one tick
+  bridges.rs      periodic Vraze land bridges (gene flow across straits)
+  quakes.rs       Vraze earthquakes that burst reservoir valaar to the surface
   terrain.rs      (plan 4) CellType + TerrainMap + JSON I/O
   viewer.rs       (plan 4) pan/zoom camera + solid-colour renderer
   tilemap.rs      (plan 4) Tiled .tmx + atlas loader + textured renderer
