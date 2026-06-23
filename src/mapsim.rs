@@ -93,6 +93,9 @@ pub fn seed_on_fed_land(
             0.5,                       // heat_tolerance
             0.5,                       // drought_tolerance
             0.0,                       // swim (arises by mutation)
+            1.0,                       // valaar_reliance (starts fully valaar-dependent)
+            0.0,                       // heat_affinity (arises by mutation)
+            0.0,                       // water_affinity (arises by mutation)
         ])
         .clamped();
         let energy = sim.eco.initial_energy;
@@ -427,12 +430,12 @@ mod tests {
     fn marker_color_greens_autotrophs_reds_predators() {
         let c = Coord::new(0, 0, Layer::Surface);
         let auto = TraitOrganism::new(
-            Genome::from_array([0.5, 0.5, 0.5, 0.0, 0.5, 0.5, 0.5, 0.5, 0.5]),
+            Genome::from_array([0.5, 0.5, 0.5, 0.0, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0, 0.0, 0.0]),
             c,
             1.0,
         );
         let pred = TraitOrganism::new(
-            Genome::from_array([0.5, 0.5, 0.5, 1.0, 0.5, 0.5, 0.5, 0.5, 0.5]),
+            Genome::from_array([0.5, 0.5, 0.5, 1.0, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0, 0.0, 0.0]),
             c,
             1.0,
         );
@@ -459,7 +462,7 @@ mod tests {
         let (labels, n) = label_continents(&m, w, 1);
         let mut pop = Population::new();
         let g = |diet: f32, size: f32| {
-            Genome::from_array([size, 0.5, 0.5, diet, 0.5, 0.5, 0.5, 0.5, 0.5])
+            Genome::from_array([size, 0.5, 0.5, diet, 0.5, 0.5, 0.5, 0.5, 0.5, 1.0, 0.0, 0.0])
         };
         pop.spawn(TraitOrganism::new(
             g(0.0, 0.2),
