@@ -9,6 +9,7 @@ use alife::mapsim::{
     place_reservoir_pools, seed_on_fed_land, world_from_materials,
 };
 use alife::bridges::{find_bridge_sites, open_bridge_cells, BridgeConfig, Bridges};
+use alife::quakes::{QuakeConfig, Quakes};
 use alife::params::EcoParams;
 use alife::rng::Rng;
 use alife::history::{ContinentPoint, History, Snapshot};
@@ -36,8 +37,10 @@ const HISTORY_CAP: usize = 4000;
 const SAMPLE_EVERY: u32 = 5;
 const CAVE_BACKDROP: u32 = 0x000A_0A12; // dark rock for the Underground view
 // Feature flag: install the underground valaar reservoirs (the crystalline sink)
-// into the live map. Flip to `false` to build the world without them.
-const ENABLE_UNDERGROUND_RESERVOIRS: bool = true;
+// + the Vraze earthquakes that release them. Flip to `false` to build the world
+// without reservoirs or quakes.
+const ENABLE_RESERVOIRS_AND_QUAKES: bool = true;
+const QUAKE_SEED: u64 = 0x9DA4E;
 
 /// The editable working copy behind the Parameters panel.
 #[derive(Clone)]
@@ -46,6 +49,7 @@ struct Tunables {
     diffuse_rate: f32,
     decay: f32,
     bridges: BridgeConfig,
+    quakes: QuakeConfig,
 }
 
 impl Default for Tunables {
@@ -56,6 +60,7 @@ impl Default for Tunables {
             diffuse_rate: p.diffuse_rate,
             decay: p.decay,
             bridges: BridgeConfig::default(),
+            quakes: QuakeConfig::default(),
         }
     }
 }
@@ -132,11 +137,12 @@ fn build_sim(
     let mut world = world_from_materials(sw, sh, mats);
     world.params.diffuse_rate = tun.diffuse_rate;
     world.params.decay = tun.decay;
-    if ENABLE_UNDERGROUND_RESERVOIRS {
-        let pools = place_reservoir_pools(sw, sh, continents);
-        add_underground_reservoirs(&mut world, &pools);
-    }
     let mut sim = Sim::new(world, tun.eco, SIM_SEED);
+    if ENABLE_RESERVOIRS_AND_QUAKES {
+        let pools = place_reservoir_pools(sw, sh, continents);
+        add_underground_reservoirs(&mut sim.world, &pools);
+        sim.set_quakes(Quakes::new(pools, tun.quakes, QUAKE_SEED));
+    }
     let sites = find_bridge_sites(mats, sw, sh, continents, &mut Rng::new(BRIDGE_SEED), &tun.bridges);
     sim.set_bridges(Bridges::new(sites, tun.bridges, BRIDGE_SEED));
     for _ in 0..WARM_STEPS {
@@ -264,6 +270,23 @@ fn draw_bridges(painter: &egui::Painter, rect: egui::Rect, cam: &Camera, t: &Til
     }
 }
 
+/// Paint a warm fracture/burst tint over cells of currently-erupting reservoir
+/// pools (Surface view only) — the earthquake's visual.
+fn draw_quakes(painter: &egui::Painter, rect: egui::Rect, cam: &Camera, t: &TileSim) {
+    let cell_px = cam.zoom * SIM_SCALE as f32;
+    let fracture = egui::Color32::from_rgba_unmultiplied(255, 120, 40, 110);
+    for (qx, qy) in t.sim.quake_active_cells() {
+        let cx = qx * SIM_SCALE;
+        let cy = qy * SIM_SCALE;
+        let sx = rect.min.x + (cx as f32 - cam.cx) * cam.zoom;
+        let sy = rect.min.y + (cy as f32 - cam.cy) * cam.zoom;
+        let cell = egui::Rect::from_min_size(egui::pos2(sx, sy), egui::vec2(cell_px, cell_px));
+        if rect.intersects(cell) {
+            painter.rect_filled(cell, 0.0, fracture);
+        }
+    }
+}
+
 /// Paint a translucent valaar overlay over the map for `layer`: per sim-cell, a
 /// rectangle whose opacity tracks the cell's valaar (normalised by the layer's
 /// peak) and whose hue is the current phase. Cells where frozen `crystal`
@@ -350,7 +373,6 @@ fn parameters_ui(ui: &mut egui::Ui, tun: &mut Tunables) -> bool {
         slider_f32(ui, "drought_stress", &mut e.drought_stress, 0.0..=1.0);
         slider_f32(ui, "detritus_fraction", &mut e.detritus_fraction, 0.0..=1.0);
         slider_f32(ui, "valaar_drain", &mut e.valaar_drain, 0.0..=1.0);
-        slider_f32(ui, "dig_drain", &mut e.dig_drain, 0.0..=1.0);
         slider_f32(ui, "base_energy", &mut e.base_energy, 0.5..=16.0);
         slider_f32(ui, "size_energy", &mut e.size_energy, 0.0..=32.0);
         slider_f32(ui, "size_cost", &mut e.size_cost, 0.0..=0.2);
@@ -373,6 +395,12 @@ fn parameters_ui(ui: &mut egui::Ui, tun: &mut Tunables) -> bool {
         slider_f32(ui, "open_fraction", &mut b.open_fraction, 0.0..=1.0);
         slider_u32(ui, "min_duration", &mut b.min_duration, 1..=117);
         slider_u32(ui, "max_duration", &mut b.max_duration, 1..=117);
+
+        ui.separator();
+        ui.label(egui::RichText::new("Quakes (reload)").strong());
+        let q = &mut tun.quakes;
+        slider_f32(ui, "erupt_fraction", &mut q.erupt_fraction, 0.0..=1.0);
+        slider_f32(ui, "release_fraction", &mut q.release_fraction, 0.0..=1.0);
 
         ui.separator();
         if ui.button("Reload (fresh run)").clicked() {
@@ -590,6 +618,7 @@ impl eframe::App for MapApp {
                 let painter = ui.painter_at(rect); // clip overlays to the map rect
                 if t.view_layer == Layer::Surface {
                     draw_bridges(&painter, rect, &self.cam, t);
+                    draw_quakes(&painter, rect, &self.cam, t);
                 }
                 if t.show_valaar {
                     draw_valaar(&painter, rect, &self.cam, t, t.view_layer);
