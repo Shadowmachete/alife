@@ -53,7 +53,8 @@ heterogeneity, trade-offs, isolation→speciation, trophic levels, disturbance).
 | 4 | Static geography — terrain map (cell type + valaar conductivity + passability), sketch-driven generator, interactive map viewer | ✅ done |
 | 5 | Terrain-aware ecology (oceans as barriers → speciation), swimming, periodic land bridges, the valaar state-machine | ✅ done |
 | 5d | Valaar phase overlay — the field made visible (amount→opacity, phase→hue, crystal tint) | ✅ done |
-| 6 | Subterranean refuge — `dig` gene + underground valaar reservoirs (the crystalline sink) + underground-view flip | ✅ done |
+| 6 | Subterranean refuge — underground valaar reservoirs (the crystalline sink) + underground-view flip | ✅ done |
+| 6b | Quakes & reservoir pools — the `dig` gene is removed; reservoirs are solid underground pools that **Vraze earthquakes** burst up to the surface (the Dusk's annual valaar pulse) | ✅ done |
 | 7+ | The natural-history / timeline layer | 🔮 future |
 
 Plans live in `docs/plans/`. Organisms sit behind a clade-agnostic `Organism`
