@@ -9,6 +9,7 @@ use crate::field::Field;
 use crate::organism::TraitOrganism;
 use crate::params::EcoParams;
 use crate::population::Population;
+use crate::quakes::Quakes;
 use crate::rng::Rng;
 use crate::season::{Calendar, Season};
 use crate::space::Space;
@@ -26,6 +27,9 @@ pub struct Sim<S: Space> {
     pub climate: Climate,
     /// Optional dynamic land bridges (terrain path only; `None` headless).
     bridges: Option<Bridges>,
+    /// Optional Vraze earthquakes that burst reservoir valaar up to the surface
+    /// (terrain path only; `None` headless).
+    quakes: Option<Quakes>,
     /// Un-multiplied Rasconne source rate, captured at construction so the
     /// per-season multiplier always scales the same base.
     base_source: f32,
@@ -55,6 +59,7 @@ impl<S: Space> Sim<S> {
             calendar: Calendar::new(),
             climate,
             bridges: None,
+            quakes: None,
             base_source,
             base_decay,
         }
@@ -78,6 +83,20 @@ impl<S: Space> Sim<S> {
     /// Attach dynamic land bridges (call once, after construction).
     pub fn set_bridges(&mut self, bridges: Bridges) {
         self.bridges = Some(bridges);
+    }
+
+    /// Attach earthquakes (call once, after construction).
+    pub fn set_quakes(&mut self, quakes: Quakes) {
+        self.quakes = Some(quakes);
+    }
+
+    /// Surface cells of currently-fracturing pools (viewer overlay); empty if no
+    /// quakes are attached.
+    pub fn quake_active_cells(&self) -> Vec<(u32, u32)> {
+        self.quakes
+            .as_ref()
+            .map(|q| q.active_cells())
+            .unwrap_or_default()
     }
 
     /// Advance one tick: calendar → season-coupled valaar → substrate → climate
@@ -112,6 +131,12 @@ impl<S: Space> Sim<S> {
             ecology::drown(&self.world.space, &mut self.pop, &upd.closed);
         }
 
+        // Vraze earthquakes: burst exposed reservoir valaar up to the surface,
+        // before feeding so life can absorb the pulse this tick.
+        if let Some(quakes) = self.quakes.as_mut() {
+            quakes.update(&self.calendar, &self.world.space, &mut self.world.valaar);
+        }
+
         ecology::absorb(&self.world.space, &mut self.world.valaar, &mut self.pop, &self.eco);
         ecology::move_organisms(
             &self.world.space,
@@ -133,6 +158,7 @@ impl<S: Space> Sim<S> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::season::CRAWS_PER_YEAR;
     use crate::space::{Grid2p5D, Space};
     use crate::world::{Params, World};
 
@@ -162,5 +188,35 @@ mod tests {
         }
         let after = sim.world.crystal.total();
         assert!(after < in_vraze, "crystal thaws once Vraze passes");
+    }
+
+    #[test]
+    fn a_quake_pulses_surface_valaar_in_vraze() {
+        use crate::quakes::{QuakeConfig, Quakes, ReservoirPool};
+        use crate::space::{Coord, Layer};
+
+        // 1x1 surface+underground world; a reservoir pool under (0,0).
+        let mut world = World::new(Grid2p5D::new(1, 1), Params::default());
+        let ui = world.space.index(Coord::new(0, 0, Layer::Underground));
+        let si = world.space.index(Coord::new(0, 0, Layer::Surface));
+        world.add_source(Coord::new(0, 0, Layer::Underground)); // pool refills below
+        let mut sim = Sim::new(world, EcoParams::default(), 1);
+
+        let cfg = QuakeConfig {
+            erupt_fraction: 1.0,
+            release_fraction: 1.0,
+            ..QuakeConfig::default()
+        };
+        sim.set_quakes(Quakes::new(vec![ReservoirPool { cells: vec![(0, 0)] }], cfg, 99));
+
+        // Run a full year; the surface cell must receive a burst during Vraze
+        // (it is 0 otherwise — nothing else feeds the surface here).
+        let mut max_surface = 0.0f32;
+        for _ in 0..CRAWS_PER_YEAR {
+            sim.step();
+            max_surface = max_surface.max(sim.world.valaar.get(si));
+        }
+        assert!(max_surface > 0.0, "a Vraze quake pulsed valaar to the surface");
+        let _ = ui; // underground accumulates between quakes
     }
 }
