@@ -384,6 +384,7 @@ fn parameters_ui(ui: &mut egui::Ui, tun: &mut Tunables) -> bool {
         slider_f32(ui, "detritus_fraction", &mut e.detritus_fraction, 0.0..=1.0);
         slider_f32(ui, "valaar_drain", &mut e.valaar_drain, 0.0..=1.0);
         slider_f32(ui, "substitute_rate", &mut e.substitute_rate, 0.0..=0.5);
+        slider_f32(ui, "crowd_cost", &mut e.crowd_cost, 0.0..=0.2);
         slider_f32(ui, "base_energy", &mut e.base_energy, 0.5..=16.0);
         slider_f32(ui, "size_energy", &mut e.size_energy, 0.0..=32.0);
         slider_f32(ui, "size_cost", &mut e.size_cost, 0.0..=0.2);

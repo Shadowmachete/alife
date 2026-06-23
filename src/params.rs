@@ -42,6 +42,10 @@ pub struct EcoParams {
     /// Energy harvested per unit of (heat·heat_affinity + water·water_affinity)
     /// to offset upkeep (the substitute relief, capped at basal cost).
     pub substitute_rate: f32,
+    /// Energy each organism pays per *other* organism sharing its cell
+    /// (density-dependent competition — caps population regardless of trait
+    /// evolution). 0 disables crowding.
+    pub crowd_cost: f32,
     /// Mutation magnitude multiplier during the Rasgun surge (1.0 = no spike).
     pub rasgun_mutation_mult: f32,
 }
@@ -67,6 +71,7 @@ impl Default for EcoParams {
             initial_energy: 4.0,
             valaar_drain: 0.15,
             substitute_rate: 0.05,
+            crowd_cost: 0.01,
             rasgun_mutation_mult: 2.0,
         }
     }

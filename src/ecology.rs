@@ -318,6 +318,26 @@ pub fn substitute_feed<S: Space>(
     }
 }
 
+/// Density-dependent competition: each organism pays `crowd_cost` energy per
+/// *other* organism sharing its cell this tick. Caps the population density
+/// regardless of how cheaply/hardily organisms evolve to live (a firm carrying
+/// capacity that trait evolution can't optimise around).
+pub fn crowding<S: Space>(space: &S, pop: &mut Population, eco: &EcoParams) {
+    if eco.crowd_cost <= 0.0 {
+        return;
+    }
+    let mut counts = vec![0u32; space.len()];
+    for o in pop.organisms() {
+        counts[space.index(o.pos)] += 1;
+    }
+    for o in pop.organisms_mut() {
+        let n = counts[space.index(o.pos)];
+        if n > 1 {
+            o.energy -= eco.crowd_cost * (n - 1) as f32;
+        }
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -417,6 +437,24 @@ mod tests {
             gen.organisms()[0].energy - 1.0 <= basal + 1e-6,
             "relief capped at basal cost"
         );
+    }
+
+    #[test]
+    fn crowding_drains_energy_in_packed_cells() {
+        let space = Grid2p5D::new(2, 1);
+        let eco = EcoParams::default();
+        let packed = Coord::new(0, 0, Layer::Surface);
+        let solo = Coord::new(1, 0, Layer::Surface);
+        let g = Genome::from_array([0.5, 1.0, 0.0, 0.0, 0.9, 0.5, 0.5, 0.5, 0.5, 1.0, 0.0, 0.0]);
+        let mut pop = Population::new();
+        pop.spawn(TraitOrganism::new(g, packed, 10.0));
+        pop.spawn(TraitOrganism::new(g, packed, 10.0));
+        pop.spawn(TraitOrganism::new(g, packed, 10.0));
+        pop.spawn(TraitOrganism::new(g, solo, 10.0));
+        crowding(&space, &mut pop, &eco);
+        // Each of the three packed pays crowd_cost * (3 - 1); the solo pays nothing.
+        assert!((10.0 - pop.organisms()[0].energy - eco.crowd_cost * 2.0).abs() < 1e-6);
+        assert_eq!(pop.organisms()[3].energy, 10.0, "a solo organism pays no crowding");
     }
 
     #[test]
