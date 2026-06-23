@@ -290,6 +290,32 @@ pub fn environmental_stress<S: Space>(
     }
 }
 
+/// Grant each **surface** organism a per-tick energy *relief* from harvesting
+/// ambient heat/water, capped at `(1 - valaar_reliance) · basal_cost` (so a
+/// fully-reliant organism gets none) and at what it can harvest
+/// (`substitute_rate · (heat·heat_affinity + water·water_affinity)`). Added before
+/// `metabolize` subtracts the full basal cost, so substitutes reduce upkeep but
+/// never produce a surplus — valaar stays the only path to growth.
+pub fn substitute_feed<S: Space>(
+    space: &S,
+    heat: &Field,
+    water: &Field,
+    pop: &mut Population,
+    eco: &EcoParams,
+) {
+    for o in pop.organisms_mut() {
+        if o.pos.layer == Layer::Underground {
+            continue;
+        }
+        let i = space.index(o.pos);
+        let fuel = eco.substitute_rate
+            * (heat.get(i) * o.genome.heat_affinity + water.get(i) * o.genome.water_affinity);
+        let cap = (1.0 - o.genome.valaar_reliance).max(0.0) * o.basal_cost(eco);
+        let relief = fuel.min(cap).max(0.0);
+        o.energy += relief;
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -352,6 +378,43 @@ mod tests {
         let g_half = half.organisms()[0].energy;
         assert!(g_full > 0.0 && g_half > 0.0);
         assert!((g_half - g_full * 0.5).abs() < 1e-6, "reliance 0.5 absorbs half as much");
+    }
+
+    #[test]
+    fn substitutes_offset_upkeep_only_for_generalists() {
+        let space = Grid2p5D::new(1, 1);
+        let eco = EcoParams::default();
+        let mut heat = crate::field::Field::zeros(space.len());
+        let water = crate::field::Field::zeros(space.len());
+        heat.set(0, 1.0); // a hot, dry cell
+        let at = Coord::new(0, 0, Layer::Surface);
+        // A heat-adapted generalist (reliance 0.0, heat_affinity 1.0) gains relief.
+        let mut gen = Population::new();
+        gen.spawn(TraitOrganism::new(
+            Genome::from_array([0.5, 1.0, 0.0, 0.0, 0.9, 0.5, 0.5, 0.5, 0.5, 0.0, 1.0, 0.0]),
+            at,
+            1.0,
+        ));
+        // A pure valaar specialist (reliance 1.0) gains nothing.
+        let mut spec = Population::new();
+        spec.spawn(TraitOrganism::new(
+            Genome::from_array([0.5, 1.0, 0.0, 0.0, 0.9, 0.5, 0.5, 0.5, 0.5, 1.0, 1.0, 0.0]),
+            at,
+            1.0,
+        ));
+        substitute_feed(&space, &heat, &water, &mut gen, &eco);
+        substitute_feed(&space, &heat, &water, &mut spec, &eco);
+        assert!(gen.organisms()[0].energy > 1.0, "generalist offsets upkeep from heat");
+        assert_eq!(spec.organisms()[0].energy, 1.0, "specialist gets no relief");
+        // Relief never exceeds basal cost (no surplus from substitutes).
+        let basal = {
+            use crate::organism::Organism;
+            gen.organisms()[0].basal_cost(&eco)
+        };
+        assert!(
+            gen.organisms()[0].energy - 1.0 <= basal + 1e-6,
+            "relief capped at basal cost"
+        );
     }
 
     #[test]
