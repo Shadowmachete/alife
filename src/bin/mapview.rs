@@ -401,6 +401,7 @@ fn parameters_ui(ui: &mut egui::Ui, tun: &mut Tunables) -> bool {
         let q = &mut tun.quakes;
         slider_f32(ui, "erupt_fraction", &mut q.erupt_fraction, 0.0..=1.0);
         slider_f32(ui, "release_fraction", &mut q.release_fraction, 0.0..=1.0);
+        slider_f32(ui, "fracture_half_width", &mut q.fracture_half_width, 0.0..=5.0);
 
         ui.separator();
         if ui.button("Reload (fresh run)").clicked() {
