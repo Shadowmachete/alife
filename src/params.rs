@@ -21,6 +21,8 @@ pub struct EcoParams {
     pub detritus_fraction: f32,
     /// Fraction of parent energy handed to a new child.
     pub repro_cost_fraction: f32,
+    /// Minimum ticks between an organism's reproductions (throttles the boom).
+    pub repro_cooldown: u32,
     /// Per-trait mutation magnitude at birth.
     pub mutation_rate: f32,
     /// Minimum lifespan in ticks (lifespan gene 0.0).
@@ -55,6 +57,7 @@ impl Default for EcoParams {
             move_cost: 0.03,
             detritus_fraction: 0.6,
             repro_cost_fraction: 0.4,
+            repro_cooldown: 20,
             mutation_rate: 0.1,
             min_lifespan: 200,
             max_lifespan: 800,

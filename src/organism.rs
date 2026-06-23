@@ -61,11 +61,13 @@ pub struct TraitOrganism {
     /// Stored valaar. This *is* the energy currency.
     pub energy: f32,
     pub age: u32,
+    /// Age at which it last reproduced; gates the reproduction cooldown.
+    pub last_repro: u32,
 }
 
 impl TraitOrganism {
     pub fn new(genome: Genome, pos: Coord, energy: f32) -> Self {
-        TraitOrganism { genome, pos, energy, age: 0 }
+        TraitOrganism { genome, pos, energy, age: 0, last_repro: 0 }
     }
 
     /// Whether this organism can tunnel through Valaar. Purely genetic

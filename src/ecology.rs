@@ -253,9 +253,11 @@ pub fn reproduce(pop: &mut Population, eco: &EcoParams, rng: &mut Rng, season: S
     let mut children: Vec<TraitOrganism> = Vec::new();
     for o in pop.organisms_mut() {
         let threshold = o.genome.repro_threshold * o.max_energy(eco);
-        if o.energy >= threshold && o.energy > 0.0 {
+        let off_cooldown = o.age >= o.last_repro.saturating_add(eco.repro_cooldown);
+        if off_cooldown && o.energy >= threshold && o.energy > 0.0 {
             let child_energy = o.energy * eco.repro_cost_fraction;
             o.energy -= child_energy;
+            o.last_repro = o.age;
             let rate = mutation_rate(eco, season);
             let child_genome = o.genome.mutate(rng, rate);
             children.push(TraitOrganism::new(child_genome, o.pos, child_energy));
@@ -720,7 +722,8 @@ mod tests {
         let mut pop = Population::new();
         // repro_threshold 0.0 => any positive energy triggers reproduction.
         let g = Genome::from_array([0.5, 1.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 0.5, 1.0, 0.0, 0.0]);
-        let parent = TraitOrganism::new(g, c, 5.0);
+        let mut parent = TraitOrganism::new(g, c, 5.0);
+        parent.age = eco.repro_cooldown; // old enough since birth to reproduce
         pop.spawn(parent);
         let mut rng = Rng::new(3);
         reproduce(&mut pop, &eco, &mut rng, Season::Goscon);
@@ -730,6 +733,24 @@ mod tests {
         assert!((child.energy - 5.0 * eco.repro_cost_fraction).abs() < 1e-6);
         // parent paid for it
         assert!(pop.organisms()[0].energy < 5.0);
+    }
+
+    #[test]
+    fn reproduction_respects_cooldown() {
+        let eco = EcoParams::default();
+        let c = Coord::new(1, 1, Layer::Surface);
+        let mut pop = Population::new();
+        // repro_threshold 0.0 => any positive energy qualifies; plenty of energy.
+        let g = Genome::from_array([0.5, 1.0, 0.0, 0.0, 0.0, 0.5, 0.5, 0.5, 0.5, 1.0, 0.0, 0.0]);
+        let mut parent = TraitOrganism::new(g, c, 100.0);
+        parent.age = eco.repro_cooldown; // cooldown since birth has elapsed
+        pop.spawn(parent);
+        let mut rng = Rng::new(3);
+        reproduce(&mut pop, &eco, &mut rng, Season::Goscon);
+        assert_eq!(pop.len(), 2, "reproduces once the cooldown has elapsed");
+        // Same age again -> still within the cooldown since the last birth.
+        reproduce(&mut pop, &eco, &mut rng, Season::Goscon);
+        assert_eq!(pop.len(), 2, "cannot reproduce again within the cooldown");
     }
 
     #[test]

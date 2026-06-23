@@ -375,6 +375,7 @@ fn parameters_ui(ui: &mut egui::Ui, tun: &mut Tunables) -> bool {
         slider_f32(ui, "move_cost", &mut e.move_cost, 0.0..=0.2);
         slider_f32(ui, "basal_cost", &mut e.basal_cost, 0.0..=0.2);
         slider_f32(ui, "repro_cost_fraction", &mut e.repro_cost_fraction, 0.0..=1.0);
+        slider_u32(ui, "repro_cooldown", &mut e.repro_cooldown, 0..=200);
         slider_f32(ui, "mutation_rate", &mut e.mutation_rate, 0.0..=0.5);
         slider_f32(ui, "rasgun_mutation_mult", &mut e.rasgun_mutation_mult, 1.0..=5.0);
         slider_f32(ui, "predation_efficiency", &mut e.predation_efficiency, 0.0..=1.0);
