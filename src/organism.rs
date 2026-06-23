@@ -121,7 +121,7 @@ mod tests {
     use crate::space::{Coord, Layer};
 
     fn genome_with(size: f32, lifespan: f32) -> Genome {
-        Genome::from_array([size, 0.5, 0.5, 0.5, 0.5, lifespan, 0.5, 0.5, 0.5, 0.5])
+        Genome::from_array([size, 0.5, 0.5, 0.5, 0.5, lifespan, 0.5, 0.5, 0.5])
     }
 
     #[test]
@@ -174,7 +174,7 @@ mod tests {
     }
 
     fn swim_genome(swim: f32) -> Genome {
-        Genome::from_array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, swim, 0.5])
+        Genome::from_array([0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, 0.5, swim])
     }
 
     #[test]

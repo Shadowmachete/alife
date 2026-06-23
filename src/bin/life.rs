@@ -26,7 +26,7 @@ fn main() {
         let x = (rng.next_unit() * w as f32) as u32;
         let y = (rng.next_unit() * h as f32) as u32;
         let pos = Coord::new(x.min(w - 1), y.min(h - 1), Layer::Surface);
-        let g = Genome::from_array([0.4, 0.7, 0.3, 0.2, 0.5, 0.6, 0.6, 0.6, 0.0, 0.0]);
+        let g = Genome::from_array([0.4, 0.7, 0.3, 0.2, 0.5, 0.6, 0.6, 0.6, 0.0]);
         sim.seed_organism(TraitOrganism::new(g, pos, sim.eco.initial_energy));
     }
 
