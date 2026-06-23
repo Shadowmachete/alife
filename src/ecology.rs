@@ -29,7 +29,8 @@ pub fn absorb<S: Space>(space: &S, field: &mut Field, pop: &mut Population, eco:
             continue;
         }
         let room = (o.max_energy(eco) - o.energy).max(0.0);
-        let want = eco.uptake_rate * o.genome.valaar_efficiency * auto * avail;
+        let want =
+            eco.uptake_rate * o.genome.valaar_efficiency * o.genome.valaar_reliance * auto * avail;
         let gain = want.min(avail).min(room);
         field.add(i, -gain);
         o.energy += gain;
@@ -322,6 +323,35 @@ mod tests {
 
         assert!(gained > 0.0, "autotroph should gain energy");
         assert!((gained - lost).abs() < 1e-5, "valaar must be conserved");
+    }
+
+    #[test]
+    fn low_reliance_absorbs_less_valaar() {
+        let space = Grid2p5D::new(1, 1);
+        let eco = EcoParams::default();
+        let mut field = crate::field::Field::zeros(space.len());
+        field.set(0, 1.0);
+        // Same genome but valaar_reliance 1.0 vs 0.5 (autotroph, full efficiency).
+        let mut full = Population::new();
+        full.spawn(TraitOrganism::new(
+            Genome::from_array([0.5, 1.0, 0.0, 0.0, 0.9, 0.5, 0.5, 0.5, 0.5, 1.0, 0.0, 0.0]),
+            Coord::new(0, 0, Layer::Surface),
+            0.0,
+        ));
+        let mut half = Population::new();
+        half.spawn(TraitOrganism::new(
+            Genome::from_array([0.5, 1.0, 0.0, 0.0, 0.9, 0.5, 0.5, 0.5, 0.5, 0.5, 0.0, 0.0]),
+            Coord::new(0, 0, Layer::Surface),
+            0.0,
+        ));
+        let mut f1 = field.clone();
+        let mut f2 = field.clone();
+        absorb(&space, &mut f1, &mut full, &eco);
+        absorb(&space, &mut f2, &mut half, &eco);
+        let g_full = full.organisms()[0].energy;
+        let g_half = half.organisms()[0].energy;
+        assert!(g_full > 0.0 && g_half > 0.0);
+        assert!((g_half - g_full * 0.5).abs() < 1e-6, "reliance 0.5 absorbs half as much");
     }
 
     #[test]
