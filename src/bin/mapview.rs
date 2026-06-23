@@ -6,7 +6,7 @@
 
 use alife::mapsim::{
     add_underground_reservoirs, compute_stats, downscale, label_continents, marker_color,
-    place_underground_reservoirs, seed_on_fed_land, world_from_materials,
+    place_reservoir_pools, seed_on_fed_land, world_from_materials,
 };
 use alife::bridges::{find_bridge_sites, open_bridge_cells, BridgeConfig, Bridges};
 use alife::params::EcoParams;
@@ -133,8 +133,8 @@ fn build_sim(
     world.params.diffuse_rate = tun.diffuse_rate;
     world.params.decay = tun.decay;
     if ENABLE_UNDERGROUND_RESERVOIRS {
-        let reservoirs = place_underground_reservoirs(sw, sh, continents);
-        add_underground_reservoirs(&mut world, &reservoirs);
+        let pools = place_reservoir_pools(sw, sh, continents);
+        add_underground_reservoirs(&mut world, &pools);
     }
     let mut sim = Sim::new(world, tun.eco, SIM_SEED);
     let sites = find_bridge_sites(mats, sw, sh, continents, &mut Rng::new(BRIDGE_SEED), &tun.bridges);
