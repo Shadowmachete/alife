@@ -55,7 +55,8 @@ heterogeneity, trade-offs, isolation→speciation, trophic levels, disturbance).
 | 5d | Valaar phase overlay — the field made visible (amount→opacity, phase→hue, crystal tint) | ✅ done |
 | 6 | Subterranean refuge — underground valaar reservoirs (the crystalline sink) + underground-view flip | ✅ done |
 | 6b | Quakes & reservoir pools — the `dig` gene is removed; reservoirs are solid underground pools that **Vraze earthquakes** burst up to the surface (the Dusk's annual valaar pulse) | ✅ done |
-| 7+ | The natural-history / timeline layer | 🔮 future |
+| 7 | Multi-energy — heat/water offset upkeep (thermotrophy/osmotrophy) gated by `valaar_reliance` + `heat_affinity`/`water_affinity`; valaar stays the only path to a surplus | ✅ done |
+| 8+ | The natural-history / timeline layer | 🔮 future |
 
 Plans live in `docs/plans/`. Organisms sit behind a clade-agnostic `Organism`
 trait (`TraitOrganism` is the first clade), so richer models (neural brains,
