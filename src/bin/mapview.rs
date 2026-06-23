@@ -87,6 +87,7 @@ struct TileSim {
     history: History,
     show_charts: bool,
     show_valaar: bool,
+    show_reliance: bool,
     show_total: bool,
     continent_visible: Vec<bool>,
     view_layer: Layer,
@@ -175,6 +176,7 @@ fn build_tile_scene(xml: &str, atlas_bytes: &[u8]) -> Scene {
         history: History::new(HISTORY_CAP),
         show_charts: false,
         show_valaar: true,
+        show_reliance: false,
         show_total: true,
         continent_visible: vec![true; n_continents as usize],
         view_layer: Layer::Surface,
@@ -347,8 +349,15 @@ fn draw_organisms(painter: &egui::Painter, rect: egui::Rect, cam: &Camera, t: &T
             continue;
         }
         let radius = ((0.25 + 0.5 * o.genome.size) * cell_px * 0.5).clamp(1.5, 64.0);
-        let c = marker_color(o);
-        let fill = egui::Color32::from_rgb((c >> 16) as u8, (c >> 8) as u8, c as u8);
+        let fill = if t.show_reliance {
+            // Colour by valaar_reliance: ochre (generalist, 0) -> valaar-blue (specialist, 1).
+            let r = o.genome.valaar_reliance.clamp(0.0, 1.0);
+            let lerp = |a: u8, b: u8| (a as f32 + (b as f32 - a as f32) * r) as u8;
+            egui::Color32::from_rgb(lerp(179, 70), lerp(134, 120), lerp(52, 210))
+        } else {
+            let c = marker_color(o);
+            egui::Color32::from_rgb((c >> 16) as u8, (c >> 8) as u8, c as u8)
+        };
         painter.circle_filled(center, radius + 1.0, egui::Color32::from_black_alpha(220)); // ring
         painter.circle_filled(center, radius, fill);
     }
@@ -373,6 +382,7 @@ fn parameters_ui(ui: &mut egui::Ui, tun: &mut Tunables) -> bool {
         slider_f32(ui, "drought_stress", &mut e.drought_stress, 0.0..=1.0);
         slider_f32(ui, "detritus_fraction", &mut e.detritus_fraction, 0.0..=1.0);
         slider_f32(ui, "valaar_drain", &mut e.valaar_drain, 0.0..=1.0);
+        slider_f32(ui, "substitute_rate", &mut e.substitute_rate, 0.0..=0.5);
         slider_f32(ui, "base_energy", &mut e.base_energy, 0.5..=16.0);
         slider_f32(ui, "size_energy", &mut e.size_energy, 0.0..=32.0);
         slider_f32(ui, "size_cost", &mut e.size_cost, 0.0..=0.2);
@@ -495,6 +505,7 @@ impl eframe::App for MapApp {
                     ui.separator();
                     ui.checkbox(&mut t.show_charts, "Charts");
                     ui.checkbox(&mut t.show_valaar, "Valaar");
+                    ui.checkbox(&mut t.show_reliance, "Colour by reliance");
                     if t.show_valaar {
                         let phase = ValaarPhase::for_season(t.sim.season());
                         let [r, g, b] = phase_rgb(phase);
