@@ -40,9 +40,9 @@ impl Default for QuakeConfig {
         QuakeConfig {
             erupt_fraction: 0.6,
             release_fraction: 0.8,
-            min_duration: 20,
-            max_duration: 40,
-            fracture_half_width: 1.0,
+            min_duration: 40,
+            max_duration: 80,
+            fracture_half_width: 2.0,
         }
     }
 }
@@ -103,7 +103,12 @@ impl Quakes {
     /// Crack pool `i` open along a random-angle band through a random pool cell:
     /// every pool cell within `fracture_half_width` of that line bursts its
     /// underground valaar up to the surface. Returns the fractured cells.
-    fn fracture_burst<S: Space>(&mut self, i: usize, space: &S, valaar: &mut Field) -> Vec<(u32, u32)> {
+    fn fracture_burst<S: Space>(
+        &mut self,
+        i: usize,
+        space: &S,
+        valaar: &mut Field,
+    ) -> Vec<(u32, u32)> {
         let cells = &self.pools[i].cells;
         if cells.is_empty() {
             return Vec::new();
@@ -211,7 +216,9 @@ mod tests {
     }
 
     fn one_pool() -> Vec<ReservoirPool> {
-        vec![ReservoirPool { cells: vec![(0, 0)] }]
+        vec![ReservoirPool {
+            cells: vec![(0, 0)],
+        }]
     }
 
     #[test]
@@ -219,13 +226,22 @@ mod tests {
         let space = Grid2p5D::new(1, 1);
         let mut valaar = Field::zeros(space.len());
         valaar.set(space.index(Coord::new(0, 0, Layer::Underground)), 1.0);
-        let cfg = QuakeConfig { erupt_fraction: 1.0, ..QuakeConfig::default() };
+        let cfg = QuakeConfig {
+            erupt_fraction: 1.0,
+            ..QuakeConfig::default()
+        };
         let mut q = Quakes::new(one_pool(), cfg, 7);
         let upd = q.update(&cal_at(150), &space, &mut valaar); // Goscon
         assert!(upd.erupted.is_empty());
         // nothing moved
-        assert_eq!(valaar.get(space.index(Coord::new(0, 0, Layer::Underground))), 1.0);
-        assert_eq!(valaar.get(space.index(Coord::new(0, 0, Layer::Surface))), 0.0);
+        assert_eq!(
+            valaar.get(space.index(Coord::new(0, 0, Layer::Underground))),
+            1.0
+        );
+        assert_eq!(
+            valaar.get(space.index(Coord::new(0, 0, Layer::Surface))),
+            0.0
+        );
     }
 
     #[test]
@@ -275,7 +291,13 @@ mod tests {
             max_duration: 10,
             fracture_half_width: 1.0,
         };
-        let mut q = Quakes::new(vec![ReservoirPool { cells: cells.clone() }], cfg, 7);
+        let mut q = Quakes::new(
+            vec![ReservoirPool {
+                cells: cells.clone(),
+            }],
+            cfg,
+            7,
+        );
         let mut erupted: Vec<(u32, u32)> = Vec::new();
         let mut c = cal_at(3 * CRAWS_PER_ARH);
         for _ in 0..CRAWS_PER_ARH {
@@ -283,7 +305,11 @@ mod tests {
             if !upd.erupted.is_empty() {
                 erupted = upd.erupted.clone();
                 // While fracturing, the viewer overlay is exactly the burst strip.
-                assert_eq!(q.active_cells().len(), erupted.len(), "active strip = burst");
+                assert_eq!(
+                    q.active_cells().len(),
+                    erupted.len(),
+                    "active strip = burst"
+                );
             }
             c.advance();
         }
@@ -304,15 +330,24 @@ mod tests {
     fn schedule_is_seed_deterministic() {
         let space = Grid2p5D::new(1, 1);
         let ui = space.index(Coord::new(0, 0, Layer::Underground));
-        let cfg = QuakeConfig { erupt_fraction: 0.5, ..QuakeConfig::default() };
+        let cfg = QuakeConfig {
+            erupt_fraction: 0.5,
+            ..QuakeConfig::default()
+        };
         let run = |seed| {
             let mut valaar = Field::zeros(space.len());
             valaar.set(ui, 1.0);
             let mut q = Quakes::new(
                 vec![
-                    ReservoirPool { cells: vec![(0, 0)] },
-                    ReservoirPool { cells: vec![(0, 0)] },
-                    ReservoirPool { cells: vec![(0, 0)] },
+                    ReservoirPool {
+                        cells: vec![(0, 0)],
+                    },
+                    ReservoirPool {
+                        cells: vec![(0, 0)],
+                    },
+                    ReservoirPool {
+                        cells: vec![(0, 0)],
+                    },
                 ],
                 cfg,
                 seed,
