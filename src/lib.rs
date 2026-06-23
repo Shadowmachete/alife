@@ -16,4 +16,5 @@ pub mod viewer;
 pub mod tilemap;
 pub mod mapsim;
 pub mod bridges;
+pub mod quakes;
 pub mod history;
